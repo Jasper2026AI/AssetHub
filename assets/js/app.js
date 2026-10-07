@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -798,7 +798,7 @@
   /** 某一类别的累计持仓盈亏 */
   function classTotal(c) {
     let v = 0, cost = 0, n = 0;
-    DB.assets.forEach(a => { if (!hasTag(a, c) || isBalance(a)) return; v += aValD(a); cost += aCostD(a); n++; });
+    DB.assets.forEach(a => { if (primary(a) !== c || isBalance(a)) return; v += aValD(a); cost += aCostD(a); n++; });   // 多类别资产只算进主类别
     return { v, pnl: v - cost, pct: cost ? ((v - cost) / Math.abs(cost)) * 100 : 0, n };
   }
 
@@ -919,7 +919,7 @@
   }
   /** 某类别近 30 天市值序列（用快照里的单价 × 当前数量） */
   function classSeries(c) {
-    const list = DB.assets.filter(a => hasTag(a, c) && !isBalance(a));
+    const list = DB.assets.filter(a => primary(a) === c && !isBalance(a));
     if (!list.length) return [];
     return snapKeys().slice(-30).filter(k => DB.snaps[k].p).map(k => {
       const p = DB.snaps[k].p;
@@ -953,7 +953,7 @@
     const icon = { stock: 'trend', crypto: 'bolt', gold: 'sparkle', fund: 'pie' }, C = colors();
     const col = v => (v > 1e-9 ? C.up : v < -1e-9 ? C.down : '#8E8E93');
     return `<section class="kpis kpis-dual">${PNL_CLASSES.map(c => {
-      const tot = classTotal(c), day = periodPnl('day', DB.assets.filter(a => hasTag(a, c))), name = t('cls_' + c);
+      const tot = classTotal(c), day = periodPnl('day', DB.assets.filter(a => primary(a) === c)), name = t('cls_' + c);
       return `<div class="kpi glass dual ${tone(tot.pnl)}">
         <div class="dual-grid">
           <div><div class="lbl"><span class="ico">${ic(icon[c])}</span>${t('kpiClsTotal', { c: name })}</div>

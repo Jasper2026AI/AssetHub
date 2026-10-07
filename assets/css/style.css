@@ -873,3 +873,5 @@ body.mobile .upd-bar{bottom:calc(84px + env(safe-area-inset-bottom))}
 
 /* ===== 资产名称：白字 + 类别底色 ===== */
 .nm-pill{--tc:#8E8E93;display:inline-block;padding:3px 10px;border-radius:999px;color:#fff;font-weight:700;background:color-mix(in srgb,var(--tc) 30%,transparent);border:1px solid color-mix(in srgb,var(--tc) 45%,transparent);max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.hold-tbl .nm-pill{font-size:12px;font-weight:600;padding:3px 10px}
+.hold-tbl .nmcell .code{font-size:12px}
