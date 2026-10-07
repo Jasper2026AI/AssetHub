@@ -99,7 +99,7 @@ Finnhub Key：https://finnhub.io/register 注册 → 复制 API Key → 粘到�
 - **两边都改过**：会弹窗让你选「保留云端」或「保留本机」。
 - **同步失败**：GitHub 偶发 HTTP 500 会自动重试 3 次；错误提示会说明原因（Token 失效 / Gist ID 不对 / 网络等）。
   一直 HTTP 500 时，点「数据设置 → 多端同步 → 新建 Gist」重新上传，再把新的 Gist ID 填到其他设备。
-- 只同步资产、记账、账本信息与操作日志；各设备的布局、配色、语言、密码、API Key 各自独立。
+- 同步资产、记账、账本信息、操作日志和行情 API Key（Finnhub / Twelve Data / Alpha Vantage，以最后修改的为准）；锁定密码随加密同步统一。布局、配色、语言和 GitHub Token 各设备独立。导出的备份文件不含任何 Key。
 
 ### 安全提示
 

@@ -45,7 +45,8 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt'];
+  const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
+  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
 
   const ICON = {
@@ -226,10 +227,13 @@
     (DB.audit || []).concat(obj.audit || []).sort((x, y) => x.ts - y.ts).forEach(e => { const k = e.ts + e.kind + e.id + e.act; if (!seen.has(k)) { seen.add(k); merged.push(e); } });
     DB.audit = merged.slice(-2000);
     S().syncedStamp = c.meta.updatedAt || 0;
+    // 行情 API Key：以最后修改的一方为准
+    const ak = obj.apiKeys;
+    if (ak && (+ak.at || 0) > (S().keysAt || 0)) { API_KEYS.forEach(k => { if (ak[k] != null) S()[k] = ak[k]; }); S().keysAt = +ak.at; }
   }
   async function pushCloud(interactive) {
     await ensureSyncKey(interactive);
-    const body = await encodeCloud(JSON.stringify(exportable()));        // 加密后再上传
+    const body = await encodeCloud(JSON.stringify(exportable(true)));    // 加密后再上传（含行情 API Key）
     const id = await Api.gistPush(S().gistToken, S().gistId, body, `AssetHub · ${bookName()}`);
     S().gistId = id; S().syncedStamp = DB.meta.updatedAt || 0; S().gistLast = Date.now();
   }
@@ -2247,9 +2251,11 @@
     if (n > 0) autoTimer = setInterval(() => { if (!document.hidden) refreshQuotes({ silent: true }); }, n * 60000);
   }
 
-  function exportable() {
+  /** cloud=true：上传到云端（已加密），附带行情 API Key；导出文件（明文）不含任何 Key */
+  function exportable(cloud) {
     const d = JSON.parse(JSON.stringify(DB));
     SECRET_KEYS.forEach(k => { d.settings[k] = ''; });
+    if (cloud) { d.apiKeys = { at: S().keysAt || 0 }; API_KEYS.forEach(k => { d.apiKeys[k] = S()[k] || ''; }); }
     d.exportedAt = new Date().toISOString();
     return d;
   }
@@ -2690,7 +2696,8 @@
         S()[k] = el.type === 'checkbox' ? el.checked : (k === 'autoRefresh' || k === 'lockMinutes') ? +el.value : k === 'gistId' ? Api.gistIdOf(el.value) : k === 'gistToken' ? Api.cleanToken(el.value) : /Key$/.test(k) ? cleanKey(el.value) : el.value.trim();
         if (k === 'gistId' || k === 'gistToken' || /Key$/.test(k)) el.value = S()[k];
         if (old === S()[k]) return;                                // 值没变（例如失焦时重复触发）就什么都不做
-        if (k === 'gistId') S().syncedStamp = 0;                 // 换了 Gist 视为全新同步
+        if (k === 'gistId') S().syncedStamp = 0;
+        if (API_KEYS.includes(k)) { S().keysAt = Date.now(); markDirty(); scheduleSync(); }   // 行情 Key 改动同步到其他设备                 // 换了 Gist 视为全新同步
         save();
         if (k === 'gistToken' || k === 'gistId' || k === 'autoSync') { renderSyncBtn(); if (S().autoSync && syncReady()) syncNow({ silent: true, interactive: true }); }
         if (k === 'autoRefresh') setupAutoRefresh();
@@ -2732,6 +2739,8 @@
   pruneSnaps();
   renderAll();
   if (demoNow) setTimeout(() => toast(t('demoAuto')), 600);
+  // 升级前就填过行情 Key 的设备：标记一次，让 Key 同步到其他设备
+  if (!S().keysAt && API_KEYS.some(k => S()[k])) { S().keysAt = Date.now(); if (syncReady()) markDirty(); save(); }
   if (S().autoSync && syncReady()) setTimeout(() => syncNow({ silent: true }), 400);   // 打开页面先拉取云端最新数据
   bindEvents();
   setupAutoRefresh();
