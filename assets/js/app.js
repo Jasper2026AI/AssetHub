@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '3.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '3.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -671,6 +671,8 @@
       s = DB.snaps[k] = { o, h: Math.max(o, net), l: Math.min(o, net), c: net };
     }
     s.h = Math.max(s.h, net); s.l = Math.min(s.l, net); s.c = net;
+    // 账本第一天（新建账本 / 清理走势后的起始日）：开 = 高 = 低 = 收 = 当前总资产，不沿用之前（旧账本）的数值
+    if (DB.meta.since && k <= DB.meta.since) { s.o = s.h = s.l = net; }
     // p / b：当日最新的单价 / 余额；po / bo：当日第一次看到的单价 / 余额（作为“今日变化”的起点）
     s.p = {}; s.b = {}; s.po = s.po || {}; s.bo = s.bo || {};
     DB.assets.forEach(a => {
@@ -688,7 +690,11 @@
   function pruneSnaps() {
     // 只保留最近 60 天 + 每月最后一天的价格明细，控制存储体积
     // 新建空白账本那天之前的快照不属于这个账本（可能是旧账本同步带进来的），删掉
-    if (DB.meta.since) Object.keys(DB.snaps).forEach(k => { if (k < DB.meta.since) delete DB.snaps[k]; });
+    if (DB.meta.since) {
+      Object.keys(DB.snaps).forEach(k => { if (k < DB.meta.since) delete DB.snaps[k]; });
+      const first = DB.snaps[DB.meta.since];
+      if (first) { first.o = first.h = first.l = first.c; }   // 起始日那根 K 线只保留收盘值
+    }
     const keys = Object.keys(DB.snaps).sort();
     const cut = ymd(new Date(Date.now() - 60 * 864e5));
     keys.forEach((k, i) => {
