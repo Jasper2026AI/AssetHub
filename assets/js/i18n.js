@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    resetDay: '清零', resetDayTip: '录错了？把这项资产今天的盈亏清零（以当前值作为今天的起点）', resetDayT: '清零「{n}」今日盈亏？', resetDayM: '当前今日盈亏 {v}。适用于录入错误或补录造成的虚假盈亏：会以当前值作为今天的起点，今日盈亏变为 0，总资产不变。真实的涨跌不要清零。', resetDayDone: '已清零今日盈亏', act_resetDay: '清零今日盈亏', fld_dayPnl: '今日盈亏',
     trimT: '清理走势记录', trimM: '现有走势记录：{a} 至 {b}，共 {n} 天。选择这个账本真正开始的日期，之前的记录会被删除（会先自动备份），并同步到其他设备。默认是你最早录入资产或记账的那天。', trimHint: '将删除 {d} 之前的 {n} 天记录', trimOk: '删除之前的记录', trimDone: '已清理 {n} 天走势记录', trimNone: '还没有走势记录', act_trim: '清理走势记录', bk_trim: '清理走势前',
     trendFewHint: '刚开始记录：每天打开一次 AssetHub（任一设备）就会多一天的数据，几天后就能看到走势',
     errTimeout: '请求超时，请检查网络后重试', errNoQuote: '没有查到这个代码的行情：请检查代码是否正确（美股如 AAPL，港股如 0700.HK，台股如 2330.TW），或改为手动维护', syncEEmpty: 'Gist 里没有 AssetHub 的数据，请检查 Gist ID', syncEOther: '未知错误，请稍后重试',
@@ -188,6 +189,7 @@ window.AV_I18N = {
   },
 
   en: {
+    resetDay: 'Reset', resetDayTip: 'Entered by mistake? Reset today’s P/L for this asset (use the current value as today’s start)', resetDayT: 'Reset today’s P/L for “{n}”?', resetDayM: 'Today’s P/L is {v}. Use this when it comes from a wrong or late entry: the current value becomes today’s starting point, today’s P/L becomes 0, and total assets don’t change. Don’t reset real price moves.', resetDayDone: 'Today’s P/L reset', act_resetDay: 'Reset today’s P/L', fld_dayPnl: 'Today’s P/L',
     trimT: 'Clean trend history', trimM: 'Trend history: {a} to {b}, {n} days. Pick the date this book really started; earlier records are deleted (auto-backed up first) and synced to other devices. Defaults to when you first entered an asset or entry.', trimHint: '{n} days before {d} will be deleted', trimOk: 'Delete earlier records', trimDone: 'Removed {n} days of trend history', trimNone: 'No trend history yet', act_trim: 'Cleaned trend history', bk_trim: 'Before trend cleanup',
     trendFewHint: 'Just started: each day you open AssetHub (on any device) adds a data point',
     errTimeout: 'Request timed out. Check your connection and retry', errNoQuote: 'No quote found for this code. Check it (US: AAPL, HK: 0700.HK, TW: 2330.TW) or switch to manual pricing', syncEEmpty: 'This Gist has no AssetHub data. Check the Gist ID', syncEOther: 'Unknown error, please retry later',

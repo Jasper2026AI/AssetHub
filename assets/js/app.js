@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '3.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -727,6 +727,7 @@
   /** “今日变化”的起点：在线行情的昨收 / 今开 → 昨天最后一次记录 → 今天第一次记录 → 当前值 */
   function dayRef(a, keys) {
     const tk = todayKey(), bal = isBalance(a);
+    if (a.dayBase && a.dayBase.d === tk) return +a.dayBase.v;           // 手动“清零今日盈亏”后的起点
     if (!bal && a.prevClose > 0 && a.prevDay === tk) return a.prevClose;
     const f = bal ? 'b' : 'p';
     for (let i = keys.length - 1; i >= 0; i--) {
@@ -739,6 +740,15 @@
     if (o && o[a.id] != null) return o[a.id];
     return bal ? +a.qty || 0 : +a.price || 0;
   }
+  /** 把这项资产“今日盈亏”的起点设为当前值（录错后修正用）；当天新录入的资产连同录入起点一起改 */
+  function rebaseDay(a) {
+    const tk = todayKey(), bal = isBalance(a), v = bal ? +a.qty || 0 : +a.price || 0;
+    a.dayBase = { d: tk, v };
+    const s = DB.snaps[tk];
+    if (s) { if (bal) { s.bo = s.bo || {}; s.bo[a.id] = v; } else { s.po = s.po || {}; s.po[a.id] = v; } }
+    if (ymd(new Date(a.createdAt || 0)) === tk) { if (bal) a.addBal = v; else a.addPrice = v; }   // 今天才录入：月 / 年 / 总变化也从这里起算
+  }
+  const canResetDay = a => a.source === 'manual' || isBalance(a) || !Api.canQuote(a);
   /** 单项资产今日变化（显示币种）：价格类 = 数量 ×（现价 − 起点价）；现金 / 负债 = 余额 − 起点余额 */
   function dayChange(a, keys) {
     keys = keys || snapKeys();
@@ -1349,7 +1359,7 @@
             <div style="flex:1;min-width:0"><div class="nm">${esc(a.name)}${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}</div>
             <div class="meta">${tagHTML(a)}${srcBadge(a)}</div></div>
             <div class="r"><div class="v num ${v < 0 ? 'down' : ''}">${money(v)}</div>
-              <div class="p num ${upDown(day)}">${t('colDay')} ${dayCell(day, dayPct, true)}</div>
+              <div class="p num ${upDown(day)}">${t('colDay')} ${dayCell(day, dayPct, true)}${resetDayBtn(a, day)}</div>
               <div class="p num ${bal ? 'dim' : upDown(pnl)}">${bal ? t('noPnl') : `${money(pnl, { sign: true })} (${pct(c ? (pnl / Math.abs(c)) * 100 : 0)})`}</div></div></div>
           <div class="hc-grid">
             <div><div class="l">${bal ? t('cashBalance') : t('colQty')}</div><div class="x num">${qtyStr(a)}${unitSuffix(a)}</div></div>
@@ -1374,7 +1384,7 @@
           <td class="r num muted">${bal ? `<span class="dim">—</span><small>${ccy}</small>` : money(conv(+a.cost || 0, ccy), { max: 8 }) + (orig ? `<small>${money(+a.cost || 0, { ccy, max: 8 })}</small>` : '')}</td>
           <td class="r num strong">${bal ? '<span class="dim">—</span>' : money(conv(+a.price || 0, ccy), { max: 8 }) + (orig ? `<small>${money(+a.price || 0, { ccy, max: 8 })}</small>` : '')}</td>
           <td class="r num strong ${v < 0 ? 'down' : ''}">${money(v, { max: 8 })}${orig ? `<small>${money(aVal(a), { ccy, max: 8 })}</small>` : ''}</td>
-          <td class="r num ${upDown(day)}">${dayCell(day, dayPct)}</td>
+          <td class="r num ${upDown(day)}">${dayCell(day, dayPct)}${resetDayBtn(a, day)}</td>
           <td class="r num ${bal ? 'dim' : upDown(pnl)}">${bal ? t('noPnl') : `${money(pnl, { sign: true })}<small class="${upDown(pnl)}">${pct(c ? (pnl / Math.abs(c)) * 100 : 0)}</small>`}</td>
           <td>${srcBadge(a)}</td>
           <td class="c">${H.batch ? '' : `<div class="ops">${histBtn('asset', a.id)}${quickBtn(a)}<button class="op edit" data-action="edit-asset" data-id="${a.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}">${ic('trash')}${t('del')}</button></div>`}</td>
@@ -1397,6 +1407,8 @@
   const histBtn = (kind, id) => `<button class="op hist" data-action="history" data-kind="${kind}" data-id="${id}" title="${t('history')}">${ic('clock')}</button>`;
   const canQuickUpdate = a => isBalance(a) || !(a.source === 'online' && Api.canQuote(a));
   const quickBtn = a => (canQuickUpdate(a) ? `<button class="op upd" data-action="update-val" data-id="${a.id}" title="${isBalance(a) ? t('updBal') : t('updVal')}">${ic('refresh')}${isBalance(a) ? t('updBalS') : t('updValS')}</button>` : '');
+  const resetDayBtn = (a, day) => (!UI.hold.batch && canResetDay(a) && Math.abs(day) >= 0.005
+    ? `<button class="reset-day" data-action="reset-day" data-id="${a.id}" title="${t('resetDayTip')}">${ic('refresh')}${t('resetDay')}</button>` : '');
   /** 今日盈亏单元格：没有变化显示 — */
   const dayCell = (ch, p, inline) => (Math.abs(ch) < 0.005 ? '<span class="dim">—</span>'
     : inline ? `${money(ch, { sign: true })} (${pct(p)})` : `${money(ch, { sign: true })}<small class="${upDown(ch)}">${pct(p)}</small>`);
@@ -2152,6 +2164,8 @@
             const d = diffOf(ex, a, ASSET_FIELDS);
             Object.assign(ex, a);
             if (d.length) logOp('asset', ex, 'edit', d);
+            // 今天才录入的手动资产：今天的编辑都算“录入设置”，不计入今日盈亏
+            if (canResetDay(ex) && ymd(new Date(ex.createdAt || 0)) === todayKey()) rebaseDay(ex);
           } else {
             const na = Object.assign({ id: uid(), createdAt: Date.now(), updatedAt: Date.now() }, a);
             DB.assets.push(na);
@@ -2631,6 +2645,15 @@
       if (await requireUnlock(UI.page === 'holdings' ? t('verifyAssetMsg') : null)) { refreshLockBtn(); toast(t('unlockedToast'), 'ok'); }
     },
     recover() { openRecovery(); },
+    async 'reset-day'(el) {
+      const a = findAsset(el.dataset.id); if (!a) return;
+      const d = dayChange(a);
+      if (!(await confirmDialog({ title: t('resetDayT', { n: esc(a.name) }), msg: t('resetDayM', { v: money(d.ch, { sign: true }) }), ok: t('resetDay'), danger: false }))) return;
+      if (!(await requireUnlock(null, !!a.locked))) return;
+      rebaseDay(a);
+      logOp('asset', a, 'resetDay', [['dayPnl', round8(d.ch), 0]]);
+      commit(); renderAll(); toast(t('resetDayDone'), 'ok');
+    },
     'trim-snaps'() { trimSnapsFlow(); },
     'set-pass'() { setPasswordFlow().then(ok => { if (ok) renderPage(); }); },
     'lock-now'() { UI.unlockUntil = 0; renderPage(); toast(t('lockedNow')); },
