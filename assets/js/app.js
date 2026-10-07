@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -651,6 +651,8 @@
   const tagsOf = a => (Array.isArray(a.cls) ? a.cls : [a.cls]);
   const primary = a => tagsOf(a)[0];
   const hasTag = (a, c) => c === 'all' || tagsOf(a).includes(c);
+  /** 按类别筛选 / 统计时只认主类别（第一个选中的类别），多类别资产不会被重复计入 */
+  const inCls = (a, c) => c === 'all' || primary(a) === c;
   const isBalance = a => tagsOf(a).every(c => c === 'cash' || c === 'liability');   // 现金/负债：数量 = 余额
   const aCcy = a => (a.ccy || 'USD').toUpperCase();
   const aVal = a => (+a.qty || 0) * (isBalance(a) ? 1 : (+a.price || 0));
@@ -1088,7 +1090,7 @@
   function openRankMenu(anchor) {
     if (popEl) { closePopover(); return; }
     const key = anchor.dataset.key || 'rankCls', cur = S()[key];
-    const cnt = c => DB.assets.filter(a => hasTag(a, c)).length;
+    const cnt = c => DB.assets.filter(a => inCls(a, c)).length;
     const pop = document.createElement('div');
     pop.className = 'popover menu';
     pop.innerHTML = ['all'].concat(CLASSES).map(c => `<button class="menu-item ${cur === c ? 'on' : ''}" data-k="${c}">
@@ -1112,7 +1114,7 @@
   function renderMoves() {
     if (!$('#rank')) return;
     const total = S().rankMode === 'total', c = S().moveCls, keys = snapKeys();
-    const list = DB.assets.filter(a => hasTag(a, c)).map(a => Object.assign({ a }, total ? totalChange(a) : dayChange(a, keys))).sort((x, y) => (S().moveSort === 'asc' ? x.ch - y.ch : y.ch - x.ch));
+    const list = DB.assets.filter(a => inCls(a, c)).map(a => Object.assign({ a }, total ? totalChange(a) : dayChange(a, keys))).sort((x, y) => (S().moveSort === 'asc' ? x.ch - y.ch : y.ch - x.ch));
     const top = Math.max(1e-9, ...list.map(x => Math.abs(x.ch)));
     const sum = list.reduce((s, x) => s + x.ch, 0);
     $('#rank').innerHTML = !DB.assets.length ? emptyState('assets') : !list.length ? `<div class="empty sm"><p>${t('noMatchCls')}</p></div>` :
@@ -1130,7 +1132,7 @@
   function renderRank() {
     if (!$('#left-body') || S().leftMode !== 'rank') return;
     const c = S().rankCls;
-    let list = DB.assets.filter(a => hasTag(a, c)).map(a => ({ a, v: aValD(a) }));
+    let list = DB.assets.filter(a => inCls(a, c)).map(a => ({ a, v: aValD(a) }));
     list = list.filter(x => x.v > 0 || c !== 'all');   // 全部类别时不显示负债 / 零值
     const asc = S().rankSort === 'asc';
     // 负债类别按欠款多少排（由多到少为“高到低”）
@@ -1310,7 +1312,7 @@
   /* ================= 页面二：资产明细 ================= */
   function holdList() {
     const H = UI.hold, q = H.q.trim().toLowerCase();
-    let list = DB.assets.filter(a => hasTag(a, H.cls));
+    let list = DB.assets.filter(a => inCls(a, H.cls));
     if (H.src !== 'all') list = list.filter(a => (isOnlineSrc(a) ? 'online' : 'manual') === H.src);
     if (H.wh !== '__all') list = list.filter(a => (a.warehouse || '') === H.wh);
     if (q) list = list.filter(a => [a.name, a.code, a.note, a.warehouse, clsLabel(a)].some(v => String(v || '').toLowerCase().includes(q)));
@@ -1323,7 +1325,7 @@
   function renderHoldings() {
     const H = UI.hold;
     const counts = { all: DB.assets.length };
-    CLASSES.forEach(c => { counts[c] = DB.assets.filter(a => hasTag(a, c)).length; });
+    CLASSES.forEach(c => { counts[c] = DB.assets.filter(a => inCls(a, c)).length; });
     const chips = ['all'].concat(CLASSES).map(c =>
       `<button class="chip ${H.cls === c ? 'on' : ''}" data-action="hold-filter" data-v="${c}">${c !== 'all' ? `<i class="cdot" style="background:${CLASS_COLOR[c]}"></i>` : ''}${c === 'all' ? t('all') : t('cls_' + c)}<em>${counts[c]}</em></button>`).join('');
     $('#page').innerHTML = `
