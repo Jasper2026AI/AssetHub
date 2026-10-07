@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '3.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '3.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2069,7 +2069,7 @@
             const q = await Api.quoteAsset(a, S());
             const p = conv(q.price, q.ccy, a.ccy);
             $('#af-price', m).value = trim8(p);
-            msg(`✓ ${t('fetched')} ${a.code} = ${money(p, { ccy: a.ccy, max: 8, raw: true })} · ${timeStr(Date.now())}`, 'ok');
+            msg(`✓ ${t('fetched')} ${a.code} = ${money(p, { ccy: a.ccy, max: 8, raw: true })} · ${timeStr(Date.now())}${q.asStock ? ' · ' + t('stockHint') : ''}`, 'ok');
             preview();
           } catch (e) { msg(errText(e), 'err'); }
           btn.disabled = false; btn.classList.remove('spin');
@@ -2119,6 +2119,7 @@
     if (m === 'NO_KEY') return t('errNoKey');
     if (m === 'MANUAL') return t('errManual');
     if (m === 'NEED_CODE') return t('errNeedCode');
+    if (m === 'CRYPTO_NOT_FOUND') return t('errCryptoNF');
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return t('errFetch') + ' · ' + t('errNetwork');
     if (/HTTP 401|Invalid API key/i.test(m)) return t('errKey401');
     if (/HTTP 429|limit/i.test(m)) return t('errKey429');

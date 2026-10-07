@@ -121,7 +121,9 @@
     for (const k of order) {
       try { const v = await CRYPTO_SOURCES[k].fn(p); if (v.price > 0) return v; } catch (e) { err = e; }
     }
-    throw err || new Error('Not found');
+    // 所有来源都找不到这个币：统一报“找不到”，而不是最后一个来源（OKX）的英文报错
+    if (err && /Invalid symbol|doesn't exist|does not exist|Not found|HTTP 400|51001/i.test(String(err.message))) throw new Error('CRYPTO_NOT_FOUND');
+    throw err || new Error('CRYPTO_NOT_FOUND');
   }
   const cryptoPriceUSD = async (code, src) => (await cryptoQuote(code, src)).price;
 
@@ -188,15 +190,24 @@
   function quoteKind(a) {
     if (!a || !a.code) return null;
     const t = tagsOf(a);
-    if (t.includes('crypto')) return 'crypto';
-    if (t.includes('stock') || t.includes('fund')) return 'stock';
+    // 同时勾了“股票 / 基金”和“加密”时，以第一个选中的（主类别）为准
+    const iC = t.indexOf('crypto'), iS = [t.indexOf('stock'), t.indexOf('fund')].filter(i => i >= 0).sort()[0];
+    if (iC >= 0 && (iS == null || iC < iS)) return 'crypto';
+    if (iS != null) return 'stock';
     if (isGold(a.code)) return 'gold';
     return null;
   }
   /** 返回 { price, prev, ccy }，价格为“每 1 单位资产”的报价，prev 为昨收/今开 */
   async function quoteAsset(a, S) {
     const k = quoteKind(a);
-    if (k === 'crypto') return Object.assign(await cryptoQuote(a.code, S.cryptoSrc), { ccy: 'USD' });
+    if (k === 'crypto') {
+      try { return Object.assign(await cryptoQuote(a.code, S.cryptoSrc), { ccy: 'USD' }); }
+      catch (e) {
+        // 加密里找不到（例如 GOOGL 被选成了“加密”）：有股票 Key 时自动改用股票行情试一次
+        if (e.message === 'CRYPTO_NOT_FOUND') { try { const q = await stockQuote(a.code, S); q.asStock = true; return q; } catch (e2) { /* 仍然报加密找不到 */ } }
+        throw e;
+      }
+    }
     if (k === 'stock') return await stockQuote(a.code, S);
     if (k === 'gold') {
       const q = await cryptoQuote('PAXG', S.cryptoSrc);

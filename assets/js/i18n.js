@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    errCryptoNF: '加密货币行情里找不到这个代码。如果它是股票或基金（如 GOOGL、AAPL），请把资产类别改成「股票」或「基金」；如果是币，请确认代码（如 BTC、ETH）', stockHint: '已按股票行情获取，建议把类别改成「股票」',
     errKey401: 'API Key 无效（HTTP 401）。请到 Finnhub 网站 Dashboard 复制 “API Key” 那一栏（不是下面的 Webhook Secret），粘贴后点「测试连接」；刚注册的账号需先点邮箱里的验证链接', errKey429: '请求太频繁或超过免费额度（HTTP 429），请稍后再试', errKey403: '没有权限（HTTP 403）：免费账号可能不支持这个市场（如港股 / 台股），可改为手动维护',
     passPickT: '本机密码和云端不同', passPickM: '云端数据是用另一个密码加密的（你刚输入的就是它）。以哪个密码为准？选「本机密码」会用本机密码重新加密云端，其他设备下次同步要输入本机密码。', passUseLocal: '以本机密码为准', passUseCloud: '以云端密码为准', passKeepLocal: '保留本机密码，云端将用它重新加密', reencDone: '云端数据已用新密码重新加密',
     newBook: '新建空白账本', newBookT: '新建空白账本？', newBookM: '将清空本机数据（会自动备份），不加载演示数据，并新建一个空白 Gist 用于同步。原来的 Gist 和数据保留不动，以后重新填入原 Gist ID 即可切换回去。', newBookMLocal: '将清空本机数据（会自动备份），不加载演示数据。', newBookDone: '已新建空白账本', gistNewDemoM: '当前是演示数据，不会上传。将清空演示数据，从空白账本开始，并新建一个 Gist。原 Gist 保留不动。',
@@ -184,6 +185,7 @@ window.AV_I18N = {
   },
 
   en: {
+    errCryptoNF: 'This code isn’t a listed crypto. If it is a stock or fund (e.g. GOOGL, AAPL), set the class to Stock or Fund; for coins, check the code (e.g. BTC, ETH)', stockHint: 'Fetched as a stock quote; consider setting the class to Stock',
     errKey401: 'Invalid API key (HTTP 401). Copy the “API Key” from your Finnhub dashboard (not the Webhook Secret). New accounts must verify their email first', errKey429: 'Rate limit or free quota exceeded (HTTP 429). Try again later', errKey403: 'Forbidden (HTTP 403): the free plan may not cover this market (e.g. HK / TW). Use manual pricing instead',
     passPickT: 'Password differs from the cloud', passPickM: 'The cloud data is encrypted with another password (the one you just entered). Which one should win? “This device” re-encrypts the cloud with this device’s password.', passUseLocal: 'Use this device’s password', passUseCloud: 'Use the cloud password', passKeepLocal: 'Keeping this device’s password; the cloud will be re-encrypted', reencDone: 'Cloud data re-encrypted with the new password',
     newBook: 'New blank book', newBookT: 'Start a new blank book?', newBookM: 'This device’s data will be cleared (auto-backed up), no demo data is loaded, and a new empty Gist is created for sync. The old Gist and its data stay untouched; re-enter its ID to switch back.', newBookMLocal: 'This device’s data will be cleared (auto-backed up) and no demo data is loaded.', newBookDone: 'New blank book created', gistNewDemoM: 'Demo data won’t be uploaded. The demo data will be cleared and a new Gist created from a blank book. The old Gist is kept.',
