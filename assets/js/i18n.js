@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    trimT: '清理走势记录', trimM: '现有走势记录：{a} 至 {b}，共 {n} 天。选择这个账本真正开始的日期，之前的记录会被删除（会先自动备份），并同步到其他设备。默认是你最早录入资产或记账的那天。', trimHint: '将删除 {d} 之前的 {n} 天记录', trimOk: '删除之前的记录', trimDone: '已清理 {n} 天走势记录', trimNone: '还没有走势记录', act_trim: '清理走势记录', bk_trim: '清理走势前',
     trendFewHint: '刚开始记录：每天打开一次 AssetHub（任一设备）就会多一天的数据，几天后就能看到走势',
     errTimeout: '请求超时，请检查网络后重试', errNoQuote: '没有查到这个代码的行情：请检查代码是否正确（美股如 AAPL，港股如 0700.HK，台股如 2330.TW），或改为手动维护', syncEEmpty: 'Gist 里没有 AssetHub 的数据，请检查 Gist ID', syncEOther: '未知错误，请稍后重试',
     errCryptoNF: '加密货币行情里找不到这个代码。如果它是股票或基金（如 GOOGL、AAPL），请把资产类别改成「股票」或「基金」；如果是币，请确认代码（如 BTC、ETH）', stockHint: '已按股票行情获取，建议把类别改成「股票」',
@@ -187,6 +188,7 @@ window.AV_I18N = {
   },
 
   en: {
+    trimT: 'Clean trend history', trimM: 'Trend history: {a} to {b}, {n} days. Pick the date this book really started; earlier records are deleted (auto-backed up first) and synced to other devices. Defaults to when you first entered an asset or entry.', trimHint: '{n} days before {d} will be deleted', trimOk: 'Delete earlier records', trimDone: 'Removed {n} days of trend history', trimNone: 'No trend history yet', act_trim: 'Cleaned trend history', bk_trim: 'Before trend cleanup',
     trendFewHint: 'Just started: each day you open AssetHub (on any device) adds a data point',
     errTimeout: 'Request timed out. Check your connection and retry', errNoQuote: 'No quote found for this code. Check it (US: AAPL, HK: 0700.HK, TW: 2330.TW) or switch to manual pricing', syncEEmpty: 'This Gist has no AssetHub data. Check the Gist ID', syncEOther: 'Unknown error, please retry later',
     errCryptoNF: 'This code isn’t a listed crypto. If it is a stock or fund (e.g. GOOGL, AAPL), set the class to Stock or Fund; for coins, check the code (e.g. BTC, ETH)', stockHint: 'Fetched as a stock quote; consider setting the class to Stock',

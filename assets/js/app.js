@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '3.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '3.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -365,6 +365,36 @@
     DB.meta.since = todayKey();   // 账本起始日：之前的快照不属于这个账本
     UI.unlockUntil = 0; UI.hold.sel.clear(); UI.led.sel.clear();
     clearTimeout(SYNC.timer); SYNC.state = 'idle'; SYNC.lastErr = '';
+  }
+  /** 清理走势记录：删除某一天之前的每日快照（例如旧账本混进来的历史），并设为账本起始日，同步到其他设备 */
+  function trimSnapsFlow() {
+    const keys = Object.keys(DB.snaps).sort();
+    if (!keys.length) { toast(t('trimNone')); return; }
+    // 默认起始日：这个账本里最早录入资产 / 记账的那一天
+    const born = DB.assets.concat(DB.txs).map(x => x.createdAt).filter(Boolean);
+    const def = born.length ? ymd(new Date(Math.min(...born))) : todayKey();
+    const root = $('#dialog-root');
+    root.innerHTML = `<div class="modal-backdrop"></div><form class="alert pass" autocomplete="off"><h4>${ic('linechart')} ${t('trimT')}</h4>
+      <p>${t('trimM', { a: keys[0], b: keys[keys.length - 1], n: keys.length })}</p>
+      <div class="pass-fields"><input class="input" type="date" name="d" value="${def}" min="${keys[0]}" max="${todayKey()}"><div class="hint" id="trim-hint"></div></div>
+      <div class="alert-btns"><button type="button" data-r="0">${t('cancel')}</button><button type="submit" class="ok">${t('trimOk')}</button></div></form>`;
+    root.classList.add('open');
+    const form = $('form', root), inp = form.elements.d;
+    const hint = () => { const n = keys.filter(k => k < inp.value).length; $('#trim-hint', form).textContent = t('trimHint', { n, d: inp.value }); };
+    inp.addEventListener('input', hint); hint();
+    const done = () => { root.classList.remove('open'); root.innerHTML = ''; };
+    $('[data-r="0"]', form).addEventListener('click', done);
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const d = inp.value; done();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+      if (!(await requireUnlock())) return;
+      backupNow('trim');
+      const n = keys.filter(k => k < d).length;
+      DB.meta.since = d; pruneSnaps();
+      logOp('system', null, 'trim', null, { from: d });
+      commit(); renderAll(); toast(t('trimDone', { n }), 'ok');
+    });
   }
   /** 用某个版本替换当前数据（先自动备份当前数据），并上传到云端 */
   function restoreData(obj, label) {
@@ -1524,6 +1554,7 @@
             <button class="btn btn-glass" data-action="import">${ic('upload')}${t('import')}</button>
             <button class="btn btn-soft" data-action="demo">${ic('sparkle')}${t('loadDemo')}</button>
             <button class="btn btn-glass" data-action="new-book">${ic('plus')}${t('newBook')}</button>
+            <button class="btn btn-glass" data-action="trim-snaps">${ic('linechart')}${t('trimT')}</button>
             <button class="btn btn-glass" data-action="recover">${ic('clock')}${t('recoverT')}</button>
             <button class="btn btn-danger" data-action="clear">${ic('trash')}${t('clearAll')}</button>
           </div>
@@ -2594,6 +2625,7 @@
       if (await requireUnlock(UI.page === 'holdings' ? t('verifyAssetMsg') : null)) { refreshLockBtn(); toast(t('unlockedToast'), 'ok'); }
     },
     recover() { openRecovery(); },
+    'trim-snaps'() { trimSnapsFlow(); },
     'set-pass'() { setPasswordFlow().then(ok => { if (ok) renderPage(); }); },
     'lock-now'() { UI.unlockUntil = 0; renderPage(); toast(t('lockedNow')); },
     export() { doExport(); },
