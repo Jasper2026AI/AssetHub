@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1389,12 +1389,12 @@
           <td class="r num ${upDown(day)}">${dayCell(day, dayPct)}${resetDayBtn(a, day)}</td>
           <td class="r num ${bal ? 'dim' : upDown(pnl)}">${bal ? t('noPnl') : `${money(pnl, { sign: true })}<small class="${upDown(pnl)}">${pct(c ? (pnl / Math.abs(c)) * 100 : 0)}</small>`}</td>
           <td><div class="srccell">${srcCell(a)}</div></td>
-          <td class="c">${H.batch ? '' : `<div class="ops">${histBtn('asset', a.id)}${quickBtn(a)}<button class="op edit" data-action="edit-asset" data-id="${a.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}">${ic('trash')}${t('del')}</button></div>`}</td>
+          <td class="c">${H.batch ? '' : `<div class="ops icon-ops">${histBtn('asset', a.id)}${quickBtn(a, true)}<button class="op edit" data-action="edit-asset" data-id="${a.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}" title="${t('del')}">${ic('trash')}</button></div>`}</td>
         </tr>`;
       }).join('');
       const sp = sumHV - sumC;
       const allSel = rows.length && rows.every(r => H.sel.has(r.a.id));
-      body = `<div class="card glass table-card"><div class="table-wrap"><table class="tbl">
+      body = `<div class="card glass table-card"><div class="table-wrap"><table class="tbl hold-tbl">
         <thead><tr>
           ${H.batch ? `<th class="ckc"><label class="ck"><input type="checkbox" data-sel-all="hold" ${allSel ? 'checked' : ''}><i></i></label></th>` : ''}
           <th>${t('colName')}</th><th>${t('colClass')}</th><th>${t('colWh')}</th><th class="r">${t('colQty')}</th><th class="r">${t('colCost')}</th><th class="r">${t('colPrice')}</th>
@@ -1408,7 +1408,7 @@
   /** 手动维护的资产显示“更新市值 / 更新余额”快捷按钮 */
   const histBtn = (kind, id) => `<button class="op hist" data-action="history" data-kind="${kind}" data-id="${id}" title="${t('history')}">${ic('clock')}</button>`;
   const canQuickUpdate = a => isBalance(a) || !(a.source === 'online' && Api.canQuote(a));
-  const quickBtn = a => (canQuickUpdate(a) ? `<button class="op upd" data-action="update-val" data-id="${a.id}" title="${isBalance(a) ? t('updBal') : t('updVal')}">${ic('refresh')}${isBalance(a) ? t('updBalS') : t('updValS')}</button>` : '');
+  const quickBtn = (a, iconOnly) => (canQuickUpdate(a) ? `<button class="op upd" data-action="update-val" data-id="${a.id}" title="${isBalance(a) ? t('updBal') : t('updVal')}">${ic('refresh')}${iconOnly ? '' : isBalance(a) ? t('updBalS') : t('updValS')}</button>` : '');
   const resetDayBtn = (a, day) => (!UI.hold.batch && canResetDay(a) && Math.abs(day) >= 0.005
     ? `<button class="reset-day" data-action="reset-day" data-id="${a.id}" title="${t('resetDayTip')}">${ic('refresh')}${t('resetDay')}</button>` : '');
   /** 今日盈亏单元格：没有变化显示 — */
@@ -1421,7 +1421,7 @@
     const H = UI.hold, n = { all: DB.assets.length, online: DB.assets.filter(isOnlineSrc).length };
     n.manual = n.all - n.online;
     return `<label class="mini-select ${compact ? 'th-select' : ''}">${compact ? '' : ic('bolt')}<select data-change="holdSrc">${['all', 'online', 'manual'].map(v =>
-      `<option value="${v}" ${H.src === v ? 'selected' : ''}>${v === 'all' ? (compact ? t('colSrc') : t('srcAll')) : v === 'online' ? t('srcOnline') : t('srcManual')} (${n[v]})</option>`).join('')}</select></label>`;
+      `<option value="${v}" ${H.src === v ? 'selected' : ''}>${v === 'all' ? (compact ? t('colSrc') : t('srcAll') + ` (${n.all})`) : (v === 'online' ? t('srcOnline') : t('srcManual')) + ` (${n[v]})`}</option>`).join('')}</select></label>`;
   }
   /** 行情来源单元格 */
   const srcCell = a => srcBadge(a);

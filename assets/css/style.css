@@ -844,3 +844,18 @@ body.mobile .hist-meta{grid-template-columns:1fr}
 .th-select select{font:inherit;font-size:inherit;font-weight:inherit;color:inherit;background:transparent;border:0;padding:0 16px 0 0;cursor:pointer;text-transform:inherit;letter-spacing:inherit}
 .th-select select option{color:#fff;background:#1c1c1e}
 body:not(.mobile) .src-tool{display:none}
+
+/* ===== 资产明细表：居中 + 紧凑 + 操作只留图标 ===== */
+.hold-tbl th,.hold-tbl td,.hold-tbl .r,.hold-tbl .c{text-align:center}
+.hold-tbl{font-size:13px}
+.hold-tbl th,.hold-tbl td{padding-left:7px;padding-right:7px}
+.hold-tbl .nmcell{justify-content:center}
+.hold-tbl .tags{justify-content:center}
+.hold-tbl td .reset-day{margin:4px auto 0}
+.hold-tbl td.wh{max-width:110px}
+.icon-ops{gap:2px}
+.icon-ops .op{padding:6px;width:30px;height:30px;justify-content:center}
+.icon-ops .op svg.i{width:15px;height:15px}
+.icon-ops .op.hist:hover,.icon-ops .op.edit:hover{background:rgba(255,255,255,.08)}
+.hold-tbl td:has(> .tags){white-space:normal}
+.hold-tbl td > .tags{max-width:118px;margin:0 auto}

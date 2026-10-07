@@ -89,7 +89,7 @@ window.AV_I18N = {
     sort_valDesc: '市值最高', sort_valAsc: '市值最低', sort_pnlDesc: '盈利最多', sort_pnlAsc: '亏损最多',
     colName: '名称 / 代码', colClass: '资产类别', colWh: '资产仓库', colQty: '持仓数量', colCost: '持仓均价', colPrice: '当前单价', colValue: '当前市值',
     colPnl: '浮动盈亏', colSrc: '行情来源', colOps: '操作',
-    srcOnline: '在线同步', srcManual: '手动维护', edit: '编辑', del: '删除', total: '合计', noPnl: '不计盈亏',
+    srcOnline: '在线', srcManual: '手动', edit: '编辑', del: '删除', total: '合计', noPnl: '不计盈亏',
     noMatch: '没有找到匹配的结果', noMatchSub: '换个关键词或筛选条件试试',
     updatedAt: '更新于', warehouse: '资产仓库', warehousePh: '如：Binance、支付宝、招商银行卡',
 
@@ -270,7 +270,7 @@ window.AV_I18N = {
     sort_valDesc: 'Highest value', sort_valAsc: 'Lowest value', sort_pnlDesc: 'Biggest gain', sort_pnlAsc: 'Biggest loss',
     colName: 'Name / Code', colClass: 'Class', colWh: 'Custody', colQty: 'Quantity', colCost: 'Avg Cost', colPrice: 'Price', colValue: 'Market Value',
     colPnl: 'Unrealized P/L', colSrc: 'Quote Source', colOps: 'Actions',
-    srcOnline: 'Live sync', srcManual: 'Manual', edit: 'Edit', del: 'Delete', total: 'Total', noPnl: 'N/A',
+    srcOnline: 'Live', srcManual: 'Manual', edit: 'Edit', del: 'Delete', total: 'Total', noPnl: 'N/A',
     noMatch: 'No matching results', noMatchSub: 'Try another keyword or filter',
     updatedAt: 'Updated', warehouse: 'Custody', warehousePh: 'e.g. Binance, Alipay, bank card',
 
