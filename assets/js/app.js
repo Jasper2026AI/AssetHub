@@ -45,6 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
+  const APP_VER = '3.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -227,9 +228,21 @@
     (DB.audit || []).concat(obj.audit || []).sort((x, y) => x.ts - y.ts).forEach(e => { const k = e.ts + e.kind + e.id + e.act; if (!seen.has(k)) { seen.add(k); merged.push(e); } });
     DB.audit = merged.slice(-2000);
     S().syncedStamp = c.meta.updatedAt || 0;
-    // 行情 API Key：以最后修改的一方为准
-    const ak = obj.apiKeys;
-    if (ak && (+ak.at || 0) > (S().keysAt || 0)) { API_KEYS.forEach(k => { if (ak[k] != null) S()[k] = ak[k]; }); S().keysAt = +ak.at; }
+  }
+  /** 合并行情 API Key（每次同步都做，和资产数据谁新谁旧无关）：
+      本机没填而云端有 → 用云端；两边都有 → 以最后修改的为准。返回 true 表示本机的 Key 更新，需要上传 */
+  function mergeKeys(cloud) {
+    const ak = cloud.apiKeys || {}, cAt = +ak.at || 0, lAt = S().keysAt || 0;
+    let changed = false, needPush = false;
+    API_KEYS.forEach(k => {
+      const lv = S()[k] || '', cv = ak[k] || '';
+      if (lv === cv) return;
+      if ((!lv && cv) || (cAt > lAt && (cv || cAt))) { S()[k] = cv; changed = true; }
+      else needPush = true;
+    });
+    if (changed && cAt > lAt) S().keysAt = cAt;
+    if (changed) save();
+    return needPush;
   }
   async function pushCloud(interactive) {
     await ensureSyncKey(interactive);
@@ -421,6 +434,7 @@
       } else {
         const cloud = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: inter });
         if (!validData(cloud)) throw new Error(t('importBad'));
+        const keysPush = mergeKeys(cloud);
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
         const cloudNew = (cStamp > (S().syncedStamp || 0) && cStamp !== DB.meta.updatedAt) || (!cStamp && !S().syncedStamp && !localDirty && (cloud.assets.length || cloud.txs.length));
         let action = 'none';
@@ -438,6 +452,8 @@
         else if (action === 'push') { await pushCloud(inter); save(); if (!opt.silent) toast(t('syncPushed'), 'ok'); }
         else { S().gistLast = Date.now(); save(); if (!opt.silent) toast(t('syncUpToDate'), 'ok'); }
         if (SYNC.reenc && action !== 'push') { await pushCloud(inter); save(); toast(t('reencDone'), 'ok'); }
+        else if (keysPush && action !== 'push') { await pushCloud(inter); save(); }   // 只有 Key 变了也要上传
+        if (UI.page === 'settings') renderPage();
       }
       SYNC.reenc = false;
       SYNC.state = 'ok'; SYNC.lastErr = '';
@@ -872,7 +888,7 @@
   }
 
   function renderFoot() {
-    $('#foot').innerHTML = `<b>${esc(bookName())}</b> · ${t('footLocal')} · AssetHub v3.0`;
+    $('#foot').innerHTML = `<b>${esc(bookName())}</b> · ${t('footLocal')} · AssetHub v${APP_VER}`;
   }
   function renderPage() {
     closePopover();
@@ -2740,7 +2756,7 @@
   renderAll();
   if (demoNow) setTimeout(() => toast(t('demoAuto')), 600);
   // 升级前就填过行情 Key 的设备：标记一次，让 Key 同步到其他设备
-  if (!S().keysAt && API_KEYS.some(k => S()[k])) { S().keysAt = Date.now(); if (syncReady()) markDirty(); save(); }
+  if (!S().keysAt && API_KEYS.some(k => S()[k])) { S().keysAt = 1; save(); }   // 很小的时间戳：只补给没有 Key 的设备，不覆盖别处的新 Key
   if (S().autoSync && syncReady()) setTimeout(() => syncNow({ silent: true }), 400);   // 打开页面先拉取云端最新数据
   bindEvents();
   setupAutoRefresh();
