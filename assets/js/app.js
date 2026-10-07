@@ -45,9 +45,9 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '3.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '3.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
-  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt'];
+  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
 
   const ICON = {
@@ -222,11 +222,15 @@
     backupNow('pull');
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs;
-    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo });
-    DB.snaps = Object.assign({}, c.snaps, DB.snaps);           // 两边的每日快照合并
+    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
+    // 每日快照：同一个 Gist 的两台设备互相合并；换了 Gist（另一个账本）就直接用云端的，不把旧账本的历史带进来
+    const sameBook = S().snapsGist === S().gistId;
+    DB.snaps = sameBook ? Object.assign({}, c.snaps, DB.snaps) : (c.snaps || {});
     const seen = new Set(), merged = [];
-    (DB.audit || []).concat(obj.audit || []).sort((x, y) => x.ts - y.ts).forEach(e => { const k = e.ts + e.kind + e.id + e.act; if (!seen.has(k)) { seen.add(k); merged.push(e); } });
+    (sameBook ? DB.audit || [] : []).concat(obj.audit || []).sort((x, y) => x.ts - y.ts).forEach(e => { const k = e.ts + e.kind + e.id + e.act; if (!seen.has(k)) { seen.add(k); merged.push(e); } });
     DB.audit = merged.slice(-2000);
+    S().snapsGist = S().gistId;
+    pruneSnaps();
     S().syncedStamp = c.meta.updatedAt || 0;
   }
   /** 合并行情 API Key（每次同步都做，和资产数据谁新谁旧无关）：
@@ -249,7 +253,7 @@
     const body = await encodeCloud(JSON.stringify(exportable(true)));
     SYNC.phase = 'push';    // 加密后再上传（含行情 API Key）
     const id = await Api.gistPush(S().gistToken, S().gistId, body, `AssetHub · ${bookName()}`);
-    S().gistId = id; S().syncedStamp = DB.meta.updatedAt || 0; S().gistLast = Date.now();
+    S().gistId = id; S().snapsGist = id; S().syncedStamp = DB.meta.updatedAt || 0; S().gistLast = Date.now();
   }
   /* ================= 同步加密 =================
      云端 Gist 只保存密文 {assethub:'enc1', salt, iter, iv, data}：锁定密码 → PBKDF2 → AES-GCM。
@@ -358,6 +362,7 @@
     DB.rates = rates; DB.audit = [];
     DB.settings.gistId = ''; DB.settings.syncedStamp = 0; DB.settings.gistLast = 0;
     DB.meta.noDemo = true;   // 不再自动填充演示数据
+    DB.meta.since = todayKey();   // 账本起始日：之前的快照不属于这个账本
     UI.unlockUntil = 0; UI.hold.sel.clear(); UI.led.sel.clear();
     clearTimeout(SYNC.timer); SYNC.state = 'idle'; SYNC.lastErr = '';
   }
@@ -367,6 +372,7 @@
     const cur = JSON.parse(JSON.stringify(DB));
     DB = migrate(Object.assign(cur, { assets: obj.assets, txs: obj.txs, snaps: obj.snaps || {}, audit: obj.audit || cur.audit, meta: Object.assign({}, cur.meta, obj.meta || {}) }));
     DB.meta.demo = !!(obj.meta && obj.meta.demo);
+    DB.meta.since = (obj.meta && obj.meta.since) || '';   // 起始日跟着恢复的版本走，避免误删历史
     logOp('system', null, 'restore', null, { from: label });
     UI.hold.sel.clear(); UI.led.sel.clear();
     commit(); renderAll(); toast(t('restoreDone'), 'ok');
@@ -452,7 +458,9 @@
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
         const cloudNew = (cStamp > (S().syncedStamp || 0) && cStamp !== DB.meta.updatedAt) || (!cStamp && !S().syncedStamp && !localDirty && (cloud.assets.length || cloud.txs.length));
         let action = 'none';
-        if (cloudNew && localDirty) {
+        const sw = S().switchPull; S().switchPull = false;
+        if (sw && (cloud.assets.length || cloud.txs.length)) action = 'pull';
+        else if (cloudNew && localDirty) {
           const keepCloud = await confirmDialog({ title: t('syncConflictT'), msg: t('syncConflictM', { c: dateTimeStr(cStamp), l: dateTimeStr(DB.meta.updatedAt) }), ok: t('syncUseCloud'), cancel: t('syncUseLocal'), danger: false, noBackdrop: true });
           action = keepCloud ? 'pull' : 'push';
         } else if (cloudNew) action = 'pull';
@@ -649,6 +657,8 @@
   }
   function pruneSnaps() {
     // 只保留最近 60 天 + 每月最后一天的价格明细，控制存储体积
+    // 新建空白账本那天之前的快照不属于这个账本（可能是旧账本同步带进来的），删掉
+    if (DB.meta.since) Object.keys(DB.snaps).forEach(k => { if (k < DB.meta.since) delete DB.snaps[k]; });
     const keys = Object.keys(DB.snaps).sort();
     const cut = ymd(new Date(Date.now() - 60 * 864e5));
     keys.forEach((k, i) => {
@@ -1200,7 +1210,7 @@
     $('#trend-legend').innerHTML = `<span>${esc(bars[0].tip)} → ${esc(bars[bars.length - 1].tip)}</span>
       <span>${t('kChange')} <b class="num ${upDown(chg)}">${money(chg, { sign: true })} (${pct(f ? (chg / Math.abs(f)) * 100 : 0)})</b></span>
       <span>${t('kHigh')} <b class="num">${money(hi)}</b></span><span>${t('kLow')} <b class="num">${money(lo)}</b></span>
-      ${range === 'day' ? `<span class="dim">${t('kDragHint')}</span>` : ''}`;
+      ${range === 'day' ? `<span class="dim">${t('kDragHint')}</span>` : ''}${Object.keys(DB.snaps).length < 3 ? `<span class="dim">${t('trendFewHint')}</span>` : ''}`;
     const sym = symOf(s.ccy);
     Charts.candle(el, {
       bars, style: s.kStyle, up: C.up, down: C.down,
@@ -2736,7 +2746,11 @@
         S()[k] = el.type === 'checkbox' ? el.checked : (k === 'autoRefresh' || k === 'lockMinutes') ? +el.value : k === 'gistId' ? Api.gistIdOf(el.value) : k === 'gistToken' ? Api.cleanToken(el.value) : /Key$/.test(k) ? cleanKey(el.value) : el.value.trim();
         if (k === 'gistId' || k === 'gistToken' || /Key$/.test(k)) el.value = S()[k];
         if (old === S()[k]) return;                                // 值没变（例如失焦时重复触发）就什么都不做
-        if (k === 'gistId') S().syncedStamp = 0;
+        if (k === 'gistId') {                                    // 换了 Gist 视为全新同步
+          // 本机数据已全部同步到旧 Gist（没有未上传的改动）或只是演示数据：直接改用新 Gist 的数据，不弹“两边都有修改”
+          S().switchPull = (DB.meta.updatedAt || 0) <= (S().syncedStamp || 0) || !!DB.meta.demo;
+          S().syncedStamp = 0;
+        }
         if (API_KEYS.includes(k)) { S().keysAt = Date.now(); markDirty(); scheduleSync(); }   // 行情 Key 改动同步到其他设备                 // 换了 Gist 视为全新同步
         save();
         if (k === 'gistToken' || k === 'gistId' || k === 'autoSync') { renderSyncBtn(); if (S().autoSync && syncReady()) syncNow({ silent: true, interactive: true }); }
