@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '3.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '3.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -246,7 +246,8 @@
   }
   async function pushCloud(interactive) {
     await ensureSyncKey(interactive);
-    const body = await encodeCloud(JSON.stringify(exportable(true)));    // 加密后再上传（含行情 API Key）
+    const body = await encodeCloud(JSON.stringify(exportable(true)));
+    SYNC.phase = 'push';    // 加密后再上传（含行情 API Key）
     const id = await Api.gistPush(S().gistToken, S().gistId, body, `AssetHub · ${bookName()}`);
     S().gistId = id; S().syncedStamp = DB.meta.updatedAt || 0; S().gistLast = Date.now();
   }
@@ -266,13 +267,25 @@
     const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
     S().syncKey = await deriveKeyRaw(pw, salt, ENC_ITER); S().syncSalt = salt; S().syncIter = ENC_ITER;
   }
+  // gzip 压缩（浏览器支持时）→ 加密 → base64 分行保存：体积约为原来的 1/5，且不会出现超长单行
+  const canZip = () => typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
+  async function zipBytes(bytes, mode) {
+    const st = new Blob([bytes]).stream().pipeThrough(mode === 'gzip' ? new CompressionStream('gzip') : new DecompressionStream('gzip'));
+    return new Uint8Array(await new Response(st).arrayBuffer());
+  }
   async function encodeCloud(text) {
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(S().syncKey), new TextEncoder().encode(text));
-    return JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, pc: S().passChangedAt || 0, iv: b64(iv), data: b64(ct) });
+    const iv = crypto.getRandomValues(new Uint8Array(12)), z = canZip();
+    let bytes = new TextEncoder().encode(text);
+    if (z) bytes = await zipBytes(bytes, 'gzip');
+    const ct = b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(S().syncKey), bytes));
+    const lines = ct.match(/.{1,100}/g) || [''];
+    const head = JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, pc: S().passChangedAt || 0, z: z ? 'gzip' : '', iv: b64(iv) });
+    return head.slice(0, -1) + ',"data":[\n' + lines.map(l => JSON.stringify(l)).join(',\n') + '\n]}';
   }
   async function decryptWith(raw, env) {
-    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, await aesKey(raw), unb64(env.data));
+    const data = Array.isArray(env.data) ? env.data.join('') : env.data;
+    let pt = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, await aesKey(raw), unb64(data)));
+    if (env.z === 'gzip') pt = await zipBytes(pt, 'gunzip');
     return new TextDecoder().decode(pt);
   }
   const isEnc = o => !!(o && o.assethub === 'enc1' && o.data);
@@ -432,6 +445,7 @@
         await pushCloud(inter); save();
         if (!opt.silent) toast(t('syncPushed'), 'ok');
       } else {
+        SYNC.phase = 'pull';
         const cloud = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: inter });
         if (!validData(cloud)) throw new Error(t('importBad'));
         const keysPush = mergeKeys(cloud);
@@ -474,7 +488,7 @@
     if (code === '404') return t('syncE404');
     if (code === '403') return t('syncE403');
     if (code === '422') return t('syncE422');
-    if (code && code[0] === '5') return t('syncE5xx', { c: code });
+    if (code && code[0] === '5') return t('syncE5xx', { c: code, p: t(SYNC.phase === 'pull' ? 'phasePull' : 'phasePush') }) + ((m.match(/req:(\S+)/) || [])[1] ? ` [${m.match(/req:(\S+)/)[1]}]` : '');
     if (/Timeout|Failed to fetch|NetworkError|Load failed/i.test(m)) return t('syncENet');
     return m;
   }

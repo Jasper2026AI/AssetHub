@@ -27,6 +27,7 @@
       const r = await fetch(url, Object.assign({}, opts, { signal: ctl.signal }));
       if (!r.ok) {
         let msg = 'HTTP ' + r.status;
+        const rid = r.headers.get('x-github-request-id'); if (rid && r.status >= 500) msg += ' req:' + rid;
         try { const j = await r.json(); msg += ' ' + (j.msg || j.message || j.error || ''); } catch (e) { /* ignore */ }
         throw new Error(msg.trim());
       }
@@ -223,7 +224,7 @@
   const cleanToken = v => String(v || '').replace(/\s+/g, '').replace(/^(token|bearer)/i, '');
   /** GitHub 偶发 5xx / 超时 / 网络抖动：自动重试（共 3 次，间隔 1.5s、4s） */
   async function ghRetry(fn) {
-    const waits = [1500, 4000];
+    const waits = [2000, 5000, 12000];
     for (let i = 0; ; i++) {
       try { return await fn(); }
       catch (e) {
@@ -238,7 +239,15 @@
     const body = { description: desc || 'AssetHub data', files: { [GIST_FILE]: { content } } };
     const headers = Object.assign(gistHeaders(token), { 'Content-Type': 'application/json' });
     let j;
-    if (id) j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}`, { method: 'PATCH', headers, body: JSON.stringify(body), timeout: 30000 }));
+    if (id) {
+      try { j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}`, { method: 'PATCH', headers, body: JSON.stringify(body), timeout: 30000 })); }
+      catch (e) {
+        // GitHub 偶尔“已经保存成功却返回 5xx”：读回来核对，内容一致就当作成功
+        if (!/HTTP 5\d\d|Timeout/.test(String(e.message))) throw e;
+        try { if ((await gistPull(token, id)) === content) return id; } catch (e2) { /* ignore */ }
+        throw e;
+      }
+    }
     else { body.public = false; j = await ghRetry(() => fetchJSON('https://api.github.com/gists', { method: 'POST', headers, body: JSON.stringify(body), timeout: 30000 })); }
     return j.id;
   }
