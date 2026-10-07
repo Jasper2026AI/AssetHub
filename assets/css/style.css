@@ -832,3 +832,15 @@ body.mobile .hist-meta{grid-template-columns:1fr}
 .reset-day svg{width:11px;height:11px}
 .reset-day:hover{opacity:1;color:var(--accent);border-color:rgba(255,144,0,.45);background:var(--accent-soft)}
 .tbl td .reset-day{display:flex;margin:4px 0 0 auto;width:max-content}
+
+/* ===== 行情来源：单项同步 + 筛选 ===== */
+.srccell{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.src-sync{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:8px;color:var(--text-3);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);cursor:pointer;transition:all .18s;flex:none}
+.src-sync svg{width:13px;height:13px}
+.src-sync:hover{color:var(--accent);border-color:rgba(255,144,0,.45);background:var(--accent-soft)}
+.src-sync.spin svg{animation:spin 1s linear infinite}
+.meta .src-sync{width:22px;height:22px;margin-left:2px}
+.th-select{padding:0;background:none;border:0;height:auto}
+.th-select select{font:inherit;font-size:inherit;font-weight:inherit;color:inherit;background:transparent;border:0;padding:0 16px 0 0;cursor:pointer;text-transform:inherit;letter-spacing:inherit}
+.th-select select option{color:#fff;background:#1c1c1e}
+body:not(.mobile) .src-tool{display:none}

@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -559,7 +559,7 @@
     busy: false,
     unlockUntil: 0,
     kEnd: 0,                                            // 日K 视窗末端偏移（0 = 最新）
-    hold: { q: '', cls: 'all', sort: 'valDesc', batch: false, sel: new Set() },
+    hold: { q: '', cls: 'all', src: 'all', sort: 'valDesc', batch: false, sel: new Set() },
     led: { mode: 'month', date: '', type: 'all', cat: 'all', acct: 'all', q: '', sort: 'dateDesc', batch: false, sel: new Set() }
   };
 
@@ -1308,6 +1308,7 @@
   function holdList() {
     const H = UI.hold, q = H.q.trim().toLowerCase();
     let list = DB.assets.filter(a => hasTag(a, H.cls));
+    if (H.src !== 'all') list = list.filter(a => (isOnlineSrc(a) ? 'online' : 'manual') === H.src);
     if (q) list = list.filter(a => [a.name, a.code, a.note, a.warehouse, clsLabel(a)].some(v => String(v || '').toLowerCase().includes(q)));
     const keys = snapKeys();
     const rows = list.map(a => { const v = aValD(a), c = aCostD(a), d = dayChange(a, keys); return { a, v, pnl: isBalance(a) ? 0 : v - c, day: d.ch, dayPct: d.pct }; });
@@ -1333,6 +1334,7 @@
       <div class="toolbar">
         <label class="search">${ic('search')}<input data-input="holdQ" value="${esc(H.q)}" placeholder="${t('holdSearchPh')}" autocomplete="off"></label>
         <label class="mini-select">${ic('sort')}<select data-change="holdSort">${['valDesc', 'valAsc', 'dayDesc', 'dayAsc', 'pnlDesc', 'pnlAsc'].map(v => `<option value="${v}" ${H.sort === v ? 'selected' : ''}>${t('sort_' + v)}</option>`).join('')}</select></label>
+        <span class="src-tool">${srcFilterHTML(false)}</span>
       </div>
       <div class="chips mb">${chips}</div>
       <div id="batch-bar"></div>
@@ -1357,7 +1359,7 @@
           <div class="hc-top">
             ${H.batch ? `<label class="ck"><input type="checkbox" data-sel="hold" value="${a.id}" ${H.sel.has(a.id) ? 'checked' : ''}><i></i></label>` : ''}
             <div style="flex:1;min-width:0"><div class="nm">${esc(a.name)}${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}</div>
-            <div class="meta">${tagHTML(a)}${srcBadge(a)}</div></div>
+            <div class="meta">${tagHTML(a)}${srcCell(a)}</div></div>
             <div class="r"><div class="v num ${v < 0 ? 'down' : ''}">${money(v)}</div>
               <div class="p num ${upDown(day)}">${t('colDay')} ${dayCell(day, dayPct, true)}${resetDayBtn(a, day)}</div>
               <div class="p num ${bal ? 'dim' : upDown(pnl)}">${bal ? t('noPnl') : `${money(pnl, { sign: true })} (${pct(c ? (pnl / Math.abs(c)) * 100 : 0)})`}</div></div></div>
@@ -1386,7 +1388,7 @@
           <td class="r num strong ${v < 0 ? 'down' : ''}">${money(v, { max: 8 })}${orig ? `<small>${money(aVal(a), { ccy, max: 8 })}</small>` : ''}</td>
           <td class="r num ${upDown(day)}">${dayCell(day, dayPct)}${resetDayBtn(a, day)}</td>
           <td class="r num ${bal ? 'dim' : upDown(pnl)}">${bal ? t('noPnl') : `${money(pnl, { sign: true })}<small class="${upDown(pnl)}">${pct(c ? (pnl / Math.abs(c)) * 100 : 0)}</small>`}</td>
-          <td>${srcBadge(a)}</td>
+          <td><div class="srccell">${srcCell(a)}</div></td>
           <td class="c">${H.batch ? '' : `<div class="ops">${histBtn('asset', a.id)}${quickBtn(a)}<button class="op edit" data-action="edit-asset" data-id="${a.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}">${ic('trash')}${t('del')}</button></div>`}</td>
         </tr>`;
       }).join('');
@@ -1396,7 +1398,7 @@
         <thead><tr>
           ${H.batch ? `<th class="ckc"><label class="ck"><input type="checkbox" data-sel-all="hold" ${allSel ? 'checked' : ''}><i></i></label></th>` : ''}
           <th>${t('colName')}</th><th>${t('colClass')}</th><th>${t('colWh')}</th><th class="r">${t('colQty')}</th><th class="r">${t('colCost')}</th><th class="r">${t('colPrice')}</th>
-          ${sortHead('val', t('colValue'))}${sortHead('day', t('colDay'))}${sortHead('pnl', t('colPnl'))}<th>${t('colSrc')}</th><th class="c">${t('colOps')}</th></tr></thead>
+          ${sortHead('val', t('colValue'))}${sortHead('day', t('colDay'))}${sortHead('pnl', t('colPnl'))}<th>${srcFilterHTML(true)}</th><th class="c">${t('colOps')}</th></tr></thead>
         <tbody>${tr}</tbody>
         <tfoot><tr>${H.batch ? '<td></td>' : ''}<td colspan="6">${t('total')} · ${t('nAssets', { n: rows.length })}</td><td class="r num">${money(sumV)}</td><td class="r num ${upDown(sumDay)}">${money(sumDay, { sign: true })}</td><td class="r num ${upDown(sp)}">${money(sp, { sign: true })}<small class="${upDown(sp)}">${pct(sumC ? (sp / Math.abs(sumC)) * 100 : 0)}</small></td><td colspan="2"></td></tr></tfoot>
       </table></div></div>`;
@@ -1413,6 +1415,16 @@
   const dayCell = (ch, p, inline) => (Math.abs(ch) < 0.005 ? '<span class="dim">—</span>'
     : inline ? `${money(ch, { sign: true })} (${pct(p)})` : `${money(ch, { sign: true })}<small class="${upDown(ch)}">${pct(p)}</small>`);
   const unitSuffix = a => (a.unit && !isBalance(a) && (hasTag(a, 'gold') || hasTag(a, 'physical')) ? ` <span class="dim">${t('unitS_' + a.unit)}</span>` : '');
+  const isOnlineSrc = a => a.source === 'online' && Api.canQuote(a);
+  /** 行情来源筛选：全部 / 在线同步 / 手动维护（工具栏和表头共用） */
+  function srcFilterHTML(compact) {
+    const H = UI.hold, n = { all: DB.assets.length, online: DB.assets.filter(isOnlineSrc).length };
+    n.manual = n.all - n.online;
+    return `<label class="mini-select ${compact ? 'th-select' : ''}">${compact ? '' : ic('bolt')}<select data-change="holdSrc">${['all', 'online', 'manual'].map(v =>
+      `<option value="${v}" ${H.src === v ? 'selected' : ''}>${v === 'all' ? (compact ? t('colSrc') : t('srcAll')) : v === 'online' ? t('srcOnline') : t('srcManual')} (${n[v]})</option>`).join('')}</select></label>`;
+  }
+  /** 行情来源单元格：标签 + 在线资产的“立即同步”按钮 */
+  const srcCell = a => srcBadge(a) + (isOnlineSrc(a) && !UI.hold.batch ? `<button class="src-sync" data-action="sync-one" data-id="${a.id}" title="${t('syncOneTip')}">${ic('refresh')}</button>` : '');
   function srcBadge(a) {
     const online = a.source === 'online' && Api.canQuote(a), err = online && a.lastErr;
     const title = online ? `${t('updatedAt')}: ${dateTimeStr(a.updatedAt)}${err ? ' · ' + errText({ message: a.lastErr }) : ''}` : '';
@@ -2599,6 +2611,19 @@
     'asset-range'(el) { S().assetRange = el.dataset.v; UI.kEnd = 0; save(); drawTrend(); },
     'k-span'(el) { S().kSpan = el.dataset.v; UI.kEnd = 0; save(); drawTrend(); },
     'k-style'(el) { S().kStyle = el.dataset.v; save(); drawTrend(); },
+    /** 立即同步这一项资产的行情（只更新它自己的单价 / 市值） */
+    async 'sync-one'(el) {
+      const a = findAsset(el.dataset.id); if (!a || el.classList.contains('spin')) return;
+      el.classList.add('spin'); el.disabled = true;
+      try {
+        await refreshRates(true);
+        await quoteInto(a); save(); renderAll();
+        toast(t('syncOneDone', { n: esc(a.name), p: money(conv(+a.price || 0, aCcy(a)), { max: 8 }) }), 'ok');
+      } catch (e) {
+        a.lastErr = (e && e.message) || 'error'; save(); renderHoldBody();
+        toast(`${esc(a.name)} · ${errText(e)}`, 'err');
+      }
+    },
     'hold-filter'(el) { UI.hold.cls = el.dataset.v; $$('[data-action="hold-filter"]').forEach(b => b.classList.toggle('on', b === el)); renderHoldBody(); },
     'hold-sort-head'(el) {
       const k = el.dataset.v, H = UI.hold;
@@ -2798,6 +2823,7 @@
       if (c === 'yStep') { S().yStep = el.value; save(); drawTrend(); return; }
       if (c === 'rankCls') { S().rankCls = el.value; save(); renderRank(); return; }
       if (c === 'holdSort') { UI.hold.sort = el.value; renderHoldBody(); return; }
+      if (c === 'holdSrc') { UI.hold.src = el.value; renderHoldBody(); $$('[data-change="holdSrc"]').forEach(x => { x.value = el.value; }); return; }
       if (c === 'ledCat') { UI.led.cat = el.value; renderLedBody(); return; }
       if (c === 'ledAcct') { UI.led.acct = el.value; renderLedBody(); return; }
       if (c === 'ledSort') { UI.led.sort = el.value; renderLedBody(); return; }
