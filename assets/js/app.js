@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -615,7 +615,10 @@
     const i = s.lastIndexOf('.');
     return i < 0 ? esc(s) : `${esc(s.slice(0, i))}<span class="dec">${esc(s.slice(i))}</span>`;
   }
-  const qtyStr = a => (hidden() ? MASK : fmtNum(+a.qty || 0, 0, 8));
+  const qtyStr = a => (hidden() ? MASK : a.noQty ? '<span class="dim">—</span>' : fmtNum(+a.qty || 0, 0, 8));
+  /** 计量单位：预设 oz / g / kg / pc 显示翻译，其余为自定义文字 */
+  const UNIT_KEYS = ['oz', 'g', 'kg', 'pc'];
+  const unitLabel = u => (UNIT_KEYS.includes(u) ? t('unitS_' + u) : String(u || ''));
   const pct = v => (v > 0 ? '+' : '') + (isFinite(v) ? v.toFixed(2) : '0.00') + '%';
   const upDown = v => (v > 1e-9 ? 'up' : v < -1e-9 ? 'down' : '');
   const tone = v => (v > 1e-9 ? 'pos' : v < -1e-9 ? 'neg' : 'flat');
@@ -804,7 +807,7 @@
   const txD = x => conv(x.type === 'transfer' && x.value != null ? +x.value : +x.amount || 0, x.ccy || S().ccy);
   const feeD = x => (x.type === 'transfer' && x.fee > 0 ? conv(x.feeValue != null ? +x.feeValue : +x.fee, x.ccy || S().ccy) : 0);
   /** 数量单位：现金 / 负债按金额（返回空串），其他资产按代码或单位 */
-  const qtyUnit = a => (!a || isBalance(a) ? '' : (a.code || t('unit_' + (a.unit || 'pc')) || a.name));
+  const qtyUnit = a => (!a || isBalance(a) ? '' : (a.code || (a.unit ? unitLabel(a.unit) : '') || a.name));
   const unitPx = a => (!a || isBalance(a) ? 1 : +a.price || 0);
   /** 显示“数量 + 单位”或金额 */
   const qtyTxt = (n, unit, ccy) => (unit ? `${hidden() ? MASK : trim8(n)} ${esc(unit)}` : money(n, { ccy, max: 8 }));   // 转账手续费（计入支出）
@@ -1381,7 +1384,7 @@
         sumV += v; sumDay += day; if (!bal) { sumC += c; sumHV += v; }
         return `<tr class="${H.sel.has(a.id) ? 'sel' : ''}">
           ${H.batch ? `<td class="ckc"><label class="ck"><input type="checkbox" data-sel="hold" value="${a.id}" ${H.sel.has(a.id) ? 'checked' : ''}><i></i></label></td>` : ''}
-          <td><div class="nmcell"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><b>${esc(a.name)}</b>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}</div>${a.note ? `<small>${esc(a.note)}</small>` : ''}</td>
+          <td><div class="nmcell"><b class="nm-pill" style="--tc:${CLASS_COLOR[primary(a)]}">${esc(a.name)}</b>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}</div>${a.note ? `<small>${esc(a.note)}</small>` : ''}</td>
           <td><div class="tags">${tagHTML(a)}</div></td>
           <td class="wh">${a.warehouse ? esc(a.warehouse) : '<span class="dim">—</span>'}</td>
           <td class="r num">${qtyStr(a)}${unitSuffix(a)}</td>
@@ -1416,7 +1419,7 @@
   /** 今日盈亏单元格：没有变化显示 — */
   const dayCell = (ch, p, inline) => (Math.abs(ch) < 0.005 ? '<span class="dim">—</span>'
     : inline ? `${money(ch, { sign: true })} (${pct(p)})` : `${money(ch, { sign: true })}<small class="${upDown(ch)}">${pct(p)}</small>`);
-  const unitSuffix = a => (a.unit && !isBalance(a) && (hasTag(a, 'gold') || hasTag(a, 'physical')) ? ` <span class="dim">${t('unitS_' + a.unit)}</span>` : '');
+  const unitSuffix = a => (a.unit && !isBalance(a) && !a.noQty ? ` <span class="dim">${esc(unitLabel(a.unit))}</span>` : '');
   const isOnlineSrc = a => a.source === 'online' && Api.canQuote(a);
   /** 行情来源筛选：全部 / 在线同步 / 手动维护（工具栏和表头共用） */
   function srcFilterHTML(compact) {
@@ -2036,10 +2039,12 @@
   }
 
   /* ---- 添加 / 编辑资产 ---- */
+  /** 输入的单位 → 存储值：oz / g / kg 和“件 / pc”存成预设键，其余原样保存 */
+  const unitKey = v => { const s = String(v || '').trim(); if (!s) return ''; const l = s.toLowerCase(); if (['oz', 'g', 'kg'].includes(l)) return l; if (s === t('unitS_pc') || l === 'pc' || s === '件') return 'pc'; return s; };
   function openAssetModal(id) {
     const ex = id ? findAsset(id) : null;
     const f = ex ? Object.assign({}, ex, { cls: tagsOf(ex).slice() })
-      : { cls: [UI.hold.cls !== 'all' ? UI.hold.cls : 'stock'], name: '', code: '', qty: '', cost: '', price: '', ccy: 'USD', unit: 'g', source: 'online', note: '', warehouse: '' };
+      : { cls: [UI.hold.cls !== 'all' ? UI.hold.cls : 'stock'], name: '', code: '', qty: '', cost: '', price: '', ccy: 'USD', unit: '', source: 'online', note: '', warehouse: '' };
     if (!ex && isBalance(f)) { f.ccy = S().ccy; f.source = 'manual'; }
     const isStd = DISPLAY_CCYS.includes(aCcy(f));
     const num = v => (v === '' || v == null ? '' : esc(trim8(v)));
@@ -2059,8 +2064,9 @@
           <datalist id="af-wh-list">${whs.map(w => `<option value="${esc(w)}">`).join('')}</datalist>
           <div class="wh-chips" id="af-wh-chips">${WAREHOUSE_PRESETS.map(w => `<button type="button" data-v="${esc(w)}" class="${f.warehouse === w ? 'on' : ''}">${esc(w)}</button>`).join('')}</div></div>
       <div class="row2">
-        <div class="field"><label id="af-qty-l"></label><input class="input num" id="af-qty" inputmode="decimal" autocomplete="off" value="${num(f.qty)}" placeholder="0.00000000"></div>
-        <div class="field" id="af-unit-wrap"><label>${t('unit')}</label><select class="input" id="af-unit">${['oz', 'g', 'kg', 'pc'].map(u => `<option value="${u}" ${f.unit === u ? 'selected' : ''}>${t('unit_' + u)}</option>`).join('')}</select></div>
+        <div class="field"><label id="af-qty-l"></label><input class="input num" id="af-qty" inputmode="decimal" autocomplete="off" value="${f.noQty ? '' : num(f.qty)}" placeholder="0.00000000"></div>
+        <div class="field" id="af-unit-wrap"><label>${t('unit')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="af-unit" list="af-unit-list" maxlength="12" value="${esc(unitLabel(f.unit))}" placeholder="${t('unitPh')}" autocomplete="off">
+          <datalist id="af-unit-list">${['oz', 'g', 'kg'].concat(t('unitPresets').split(',')).map(u => `<option value="${esc(u)}">`).join('')}</datalist></div>
         <div class="field hide-bal" id="af-cost-wrap"><label>${t('avgCost')}</label><input class="input num" id="af-cost" inputmode="decimal" autocomplete="off" value="${num(f.cost)}" placeholder="0.00"></div>
       </div>
       <div class="field hide-bal"><label>${t('curPrice')}</label><div class="input-group">
@@ -2083,7 +2089,7 @@
           return {
             cls: st.cls.slice(), name: $('#af-name', m).value.trim(), code: $('#af-code', m).value.trim().toUpperCase(),
             ccy, qty: parseNum($('#af-qty', m).value), cost: parseNum($('#af-cost', m).value), price: parseNum($('#af-price', m).value),
-            unit: $('#af-unit', m).value, source: st.source, note: $('#af-note', m).value.trim(), warehouse: $('#af-wh', m).value.trim()
+            unit: unitKey($('#af-unit', m).value), source: st.source, note: $('#af-note', m).value.trim(), warehouse: $('#af-wh', m).value.trim()
           };
         };
         const drawCls = () => {
@@ -2096,11 +2102,12 @@
         const sync = () => {
           const a = readForm(), bal = isBalance(a);
           $$('.hide-bal', m).forEach(el => { el.style.display = bal ? 'none' : ''; });
-          const showUnit = !bal && (a.cls.includes('gold') || a.cls.includes('physical'));
+          const showUnit = !bal;   // 所有非现金类资产都可以填计量单位（选填）
           $('#af-unit-wrap', m).style.display = showUnit ? '' : 'none';
           $('#af-cost-wrap', m).style.gridColumn = showUnit ? '1 / -1' : '';
           $('#af-code-wrap', m).style.display = bal ? 'none' : '';
-          $('#af-qty-l', m).textContent = bal ? t('cashBalance') : t('colQty');
+          $('#af-qty-l', m).innerHTML = bal ? t('cashBalance') : `${t('colQty')} <span class="dim">· ${t('codeOpt')}</span>`;
+          $('#af-qty', m).placeholder = bal ? '0.00' : t('qtyPh');
           const p = a.cls[0];
           $('#af-name', m).placeholder = t('namePh_' + p);
           $('#af-code', m).placeholder = t('codePh_' + p);
@@ -2148,7 +2155,7 @@
         });
         ['#af-qty', '#af-cost', '#af-price', '#af-ccy-other'].forEach(s => $(s, m).addEventListener('input', preview));
         $('#af-code', m).addEventListener('input', sync);
-        $('#af-unit', m).addEventListener('change', preview);
+        $('#af-unit', m).addEventListener('input', preview);
         $('#af-fetch', m).addEventListener('click', async () => {
           const a = readForm();
           if (!a.code) { msg(t('errNeedCode'), 'err'); $('#af-code', m).focus(); return; }
@@ -2169,7 +2176,11 @@
           const a = readForm(), bal = isBalance(a);
           if (!a.name && !a.code) { toast(t('errNeedName'), 'err'); $('#af-name', m).focus(); return; }
           if (!a.name) a.name = a.code;
-          if (isNaN(a.qty)) { toast(t('errQty'), 'err'); $('#af-qty', m).focus(); return; }
+          // 数量选填：现金类不填 = 0；其他资产不填 = 按 1 份计（单价就是总市值），列表里数量显示 —
+          const qtyRaw = $('#af-qty', m).value.trim();
+          a.noQty = false;
+          if (!qtyRaw) { if (bal) a.qty = 0; else { a.qty = 1; a.noQty = true; } }
+          else if (isNaN(a.qty)) { toast(t('errQty'), 'err'); $('#af-qty', m).focus(); return; }
           if (!validCcy(a.ccy)) { toast(t('errRate', { c: a.ccy }), 'err'); return; }
           if (bal) {
             a.cost = 1; a.price = 1; a.source = 'manual'; a.code = '';
@@ -2181,7 +2192,7 @@
             if (!Api.canQuote(a)) a.source = 'manual';
             if (a.cls.includes('liability') && a.qty > 0) a.qty = -a.qty;
           }
-          if (!(a.cls.includes('gold') || a.cls.includes('physical'))) a.unit = '';
+          if (bal) a.unit = '';
           if (ex) {
             if (ex.price !== a.price) a.updatedAt = Date.now();
             if (ex.code !== a.code || ex.unit !== a.unit) { a.prevClose = 0; a.prevDay = ''; }

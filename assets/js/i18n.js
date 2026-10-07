@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    unitPh: '如 g、oz、份、股', unitPresets: '件,份,股,枚,张,手', qtyPh: '不填则按 1 份计，单价即总市值',
     whAll: '全部仓库', whNone: '未填写', showHide: '显示 / 隐藏',
     newVer: '有新版本 v{v}', newVerBtn: '立即更新',
     srcAll: '全部来源', syncOneTip: '立即同步这一项的行情（更新单价和市值）', syncOneDone: '「{n}」已更新 · 单价 {p}',
@@ -89,8 +90,8 @@ window.AV_I18N = {
     holdTitle: '资产明细', addAsset: '添加新资产', editAsset: '编辑资产',
     holdSearchPh: '搜索名称 / 代码 / 备注 / 仓库，如“黄金”',
     sort_valDesc: '市值最高', sort_valAsc: '市值最低', sort_pnlDesc: '盈利最多', sort_pnlAsc: '亏损最多',
-    colName: '名称 / 代码', colClass: '资产类别', colWh: '资产仓库', colQty: '持仓数量', colCost: '持仓均价', colPrice: '当前单价', colValue: '当前市值',
-    colPnl: '浮动盈亏', colSrc: '行情来源', colOps: '操作',
+    colName: '名称 / 代码', colClass: '资产类别', colWh: '仓库', colQty: '持仓数量', colCost: '持仓均价', colPrice: '当前单价', colValue: '当前市值',
+    colPnl: '浮动盈亏', colSrc: '来源', colOps: '操作',
     srcOnline: '在线', srcManual: '手动', edit: '编辑', del: '删除', total: '合计', noPnl: '不计盈亏',
     noMatch: '没有找到匹配的结果', noMatchSub: '换个关键词或筛选条件试试',
     updatedAt: '更新于', warehouse: '资产仓库', warehousePh: '如：Binance、支付宝、招商银行卡',
@@ -192,6 +193,7 @@ window.AV_I18N = {
   },
 
   en: {
+    unitPh: 'e.g. g, oz, units, shares', unitPresets: 'pc,units,shares,coins', qtyPh: 'Leave empty to treat as 1 lot (price = total value)',
     whAll: 'All custodies', whNone: 'Not set', showHide: 'Show / hide',
     newVer: 'New version v{v} available', newVerBtn: 'Update now',
     srcAll: 'All sources', syncOneTip: 'Fetch this asset’s quote now (updates price and value)', syncOneDone: '“{n}” updated · price {p}',
@@ -273,7 +275,7 @@ window.AV_I18N = {
     holdSearchPh: 'Search name / code / note / custody, e.g. “gold”',
     sort_valDesc: 'Highest value', sort_valAsc: 'Lowest value', sort_pnlDesc: 'Biggest gain', sort_pnlAsc: 'Biggest loss',
     colName: 'Name / Code', colClass: 'Class', colWh: 'Custody', colQty: 'Quantity', colCost: 'Avg Cost', colPrice: 'Price', colValue: 'Market Value',
-    colPnl: 'Unrealized P/L', colSrc: 'Quote Source', colOps: 'Actions',
+    colPnl: 'Unrealized P/L', colSrc: 'Source', colOps: 'Actions',
     srcOnline: 'Live', srcManual: 'Manual', edit: 'Edit', del: 'Delete', total: 'Total', noPnl: 'N/A',
     noMatch: 'No matching results', noMatchSub: 'Try another keyword or filter',
     updatedAt: 'Updated', warehouse: 'Custody', warehousePh: 'e.g. Binance, Alipay, bank card',
