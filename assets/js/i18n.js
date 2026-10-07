@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    newBook: '新建空白账本', newBookT: '新建空白账本？', newBookM: '将清空本机数据（会自动备份），不加载演示数据，并新建一个空白 Gist 用于同步。原来的 Gist 和数据保留不动，以后重新填入原 Gist ID 即可切换回去。', newBookMLocal: '将清空本机数据（会自动备份），不加载演示数据。', newBookDone: '已新建空白账本', gistNewDemoM: '当前是演示数据，不会上传。将清空演示数据，从空白账本开始，并新建一个 Gist。原 Gist 保留不动。',
     close: '关闭', restore: '恢复', recoverT: '数据恢复', recoverIntro: '每次加载演示、导入、清空、云端覆盖或恢复之前，系统都会自动备份当前数据（本机保留最近 10 份）。云端 Gist 保存了每一次上传的历史版本。恢复前会再备份一次当前数据，可放心尝试。', recoverLocal: '本机自动备份', recoverNoLocal: '暂无本机备份', recoverLegacy: '旧版 AssetView 数据', recoverCloud: '云端历史版本（Gist）', recoverLoadCloud: '读取云端历史版本', recoverNoCloud: '未设置 Token / Gist ID，或没有历史版本', recoverView: '查看', recoverClickView: '点「查看」读取内容', restoreT: '恢复这个版本？', restoreM: '将恢复为：{s}。当前数据会先自动备份，恢复后会同步到云端。', restoreDone: '已恢复', demoTag: '演示数据', act_restore: '恢复数据',
     bk_demo: '加载演示前', bk_import: '导入前', bk_clear: '清空前', bk_pull: '云端覆盖前', bk_restore: '恢复前',
     syncNeedPass: '云端数据已加密，需要输入密码：点右上角云朵按钮', syncCanceled: '已取消', syncDemoBlock: '本机是演示数据，不会自动上传覆盖云端；点云朵按钮可改用云端数据', demoBlockT: '本机是演示数据', demoBlockM: '云端有你的数据（{s}）。为防止覆盖，演示数据不会上传。要用云端数据替换本机吗？', demoPushT: '上传演示数据？', demoPushM: '本机当前是演示数据，上传会覆盖云端（云端历史版本仍可在「数据恢复」找回）。确定上传？',
@@ -150,7 +151,7 @@ window.AV_I18N = {
     export: '导出数据', import: '导入数据', clearAll: '清空本地数据', exported: '已导出 JSON 备份文件',
     importOk: '导入成功', importBad: '文件格式不正确', importT: '导入数据？', importM: '将用「{n}」（{a} 项资产、{x} 条记账）覆盖当前全部数据。',
     demoT: '加载演示数据？', demoM: '当前数据会被演示数据替换（会自动备份，可在「数据恢复」找回）。演示数据不会自动上传覆盖云端。', demoLoaded: '演示数据已加载',
-    clearT: '清空全部本地数据？', clearM: '所有资产、记账、快照与设置将被删除且无法恢复，建议先导出备份。', cleared: '本地数据已清空',
+    clearT: '清空全部本地数据？', clearM: '所有资产、记账、快照将被删除（会自动备份，可在「数据恢复」找回），也不会再加载演示数据。Token、密码等设置保留，但会断开当前 Gist（云端数据不受影响，重新填入 Gist ID 即可找回）。', cleared: '本地数据已清空',
     defaultBookName: '我的 AssetHub', demoBookName: "Jasper's AssetHub",
 
     setSyncT: '多端同步 · GitHub Gist', setSyncSub: '把数据保存到你自己 GitHub 账号下的私有 Gist。每台设备填入同一个 Token 和 Gist ID 后会自动同步；右上角的同步按钮可随时手动同步一次。只同步资产、记账和账本信息，各设备的布局、配色、密码各自独立。Token 只保存在本机。',
@@ -181,6 +182,7 @@ window.AV_I18N = {
   },
 
   en: {
+    newBook: 'New blank book', newBookT: 'Start a new blank book?', newBookM: 'This device’s data will be cleared (auto-backed up), no demo data is loaded, and a new empty Gist is created for sync. The old Gist and its data stay untouched; re-enter its ID to switch back.', newBookMLocal: 'This device’s data will be cleared (auto-backed up) and no demo data is loaded.', newBookDone: 'New blank book created', gistNewDemoM: 'Demo data won’t be uploaded. The demo data will be cleared and a new Gist created from a blank book. The old Gist is kept.',
     close: 'Close', restore: 'Restore', recoverT: 'Data recovery', recoverIntro: 'Before loading demo, importing, clearing, cloud overwrite or restoring, the current data is backed up automatically (last 10 kept on this device). The cloud Gist keeps every uploaded version. Restoring backs up the current data first.', recoverLocal: 'Local backups', recoverNoLocal: 'No local backups yet', recoverLegacy: 'Old AssetView data', recoverCloud: 'Cloud history (Gist)', recoverLoadCloud: 'Load cloud history', recoverNoCloud: 'No token / Gist ID, or no history', recoverView: 'View', recoverClickView: 'click View to read', restoreT: 'Restore this version?', restoreM: 'Restore to: {s}. Current data will be backed up first and the result synced to the cloud.', restoreDone: 'Restored', demoTag: 'demo', act_restore: 'Restored data',
     bk_demo: 'Before demo', bk_import: 'Before import', bk_clear: 'Before clear', bk_pull: 'Before cloud pull', bk_restore: 'Before restore',
     syncNeedPass: 'Cloud data is encrypted. Click the cloud button to enter the password', syncCanceled: 'Cancelled', syncDemoBlock: 'Demo data is never auto-uploaded over your cloud data. Click the cloud button to use cloud data', demoBlockT: 'This device has demo data', demoBlockM: 'The cloud has your data ({s}). Demo data won’t be uploaded. Replace this device’s data with the cloud data?', demoPushT: 'Upload demo data?', demoPushM: 'This device has demo data. Uploading overwrites the cloud (old versions stay in Data recovery). Continue?',
@@ -314,7 +316,7 @@ window.AV_I18N = {
     export: 'Export', import: 'Import', clearAll: 'Clear local data', exported: 'JSON backup exported',
     importOk: 'Import complete', importBad: 'Invalid file format', importT: 'Import data?', importM: '“{n}” ({a} assets, {x} entries) will replace all current data.',
     demoT: 'Load demo data?', demoM: 'Current data will be replaced (auto-backed up; restore it from “Data recovery”). Demo data is never auto-uploaded to the cloud.', demoLoaded: 'Demo data loaded',
-    clearT: 'Clear all local data?', clearM: 'All assets, entries, snapshots and settings will be permanently deleted. Export a backup first.', cleared: 'Local data cleared',
+    clearT: 'Clear all local data?', clearM: 'All assets, entries and snapshots will be removed (auto-backed up in Data recovery) and no demo data is loaded. Token, password and preferences are kept, but the current Gist is disconnected (cloud data is untouched; re-enter the Gist ID to get it back).', cleared: 'Local data cleared',
     defaultBookName: 'My AssetHub', demoBookName: "Jasper's AssetHub",
 
     setSyncT: 'Multi-device Sync · GitHub Gist', setSyncSub: 'Store your data in a private Gist under your own GitHub account, then pull it with the same Gist ID on any device. The token stays on this device and is stripped from exports.',

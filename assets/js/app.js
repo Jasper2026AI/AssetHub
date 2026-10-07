@@ -303,6 +303,18 @@
     list = list.slice(0, 10);
     while (list.length) { try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return; } catch (e) { list.pop(); } }
   }
+  /** 变成空白账本：清空资产 / 记账 / 快照 / 日志（先自动备份），不再填充演示数据；
+      保留本机设置（Token、密码、API Key、语言、配色等），但断开当前 Gist，避免云端旧数据被拉回来 */
+  function blankBook() {
+    backupNow('clear');
+    const keep = Object.assign({}, S()), rates = DB.rates;
+    DB = defaultDB(); Object.assign(DB.settings, keep);
+    DB.rates = rates; DB.audit = [];
+    DB.settings.gistId = ''; DB.settings.syncedStamp = 0; DB.settings.gistLast = 0;
+    DB.meta.noDemo = true;   // 不再自动填充演示数据
+    UI.unlockUntil = 0; UI.hold.sel.clear(); UI.led.sel.clear();
+    clearTimeout(SYNC.timer); SYNC.state = 'idle'; SYNC.lastErr = '';
+  }
   /** 用某个版本替换当前数据（先自动备份当前数据），并上传到云端 */
   function restoreData(obj, label) {
     backupNow('restore');
@@ -1443,6 +1455,7 @@
             <button class="btn btn-accent" data-action="export">${ic('download')}${t('export')}</button>
             <button class="btn btn-glass" data-action="import">${ic('upload')}${t('import')}</button>
             <button class="btn btn-soft" data-action="demo">${ic('sparkle')}${t('loadDemo')}</button>
+            <button class="btn btn-glass" data-action="new-book">${ic('plus')}${t('newBook')}</button>
             <button class="btn btn-glass" data-action="recover">${ic('clock')}${t('recoverT')}</button>
             <button class="btn btn-danger" data-action="clear">${ic('trash')}${t('clearAll')}</button>
           </div>
@@ -2508,13 +2521,19 @@
     demo() { loadDemo(); },
     async clear() {
       if (!(await confirmDialog({ title: t('clearT'), msg: t('clearM'), ok: t('clearAll') }))) return;
-      const keep = { lang: S().lang, layout: S().layout };
-      backupNow('clear');
-      localStorage.removeItem(STORE_KEY); LEGACY_KEYS.forEach(k => localStorage.removeItem(k));
-      DB = defaultDB(); Object.assign(DB.settings, keep);
-      DB.meta.noDemo = true;   // 清空后不再自动填充演示数据
-      UI.unlockUntil = 0; UI.hold.sel.clear(); UI.led.sel.clear();
-      save(); setupAutoRefresh(); renderAll(); toast(t('cleared'), 'ok');
+      blankBook(); save(); setupAutoRefresh(); renderAll(); toast(t('cleared'), 'ok');
+    },
+    /** 新建空白账本：清空数据（不加载演示）并新建一个 Gist；原 Gist 保留不动 */
+    async 'new-book'(el) {
+      const cloud = !!S().gistToken;
+      if (!(await confirmDialog({ title: t('newBookT'), msg: cloud ? t('newBookM') : t('newBookMLocal'), ok: t('newBook'), danger: false }))) return;
+      blankBook();
+      if (cloud) {
+        el.disabled = true; el.classList.add('spin');
+        try { markDirty(); await pushCloud(true); SYNC.state = 'ok'; SYNC.lastErr = ''; save(); toast(t('gistNewDone', { id: S().gistId }), 'ok'); }
+        catch (e) { save(); toast(t('syncFail') + ' · ' + syncErrText(e), 'err'); }
+      } else { save(); toast(t('newBookDone'), 'ok'); }
+      setupAutoRefresh(); renderAll();
     },
     'pick-icon'() { $('#file-icon').click(); },
     'remove-icon'() { DB.meta.icon = ''; commit(); renderAll(); },
@@ -2587,12 +2606,14 @@
     /** 云端 Gist 出问题（持续 5xx 等）时：新建一个 Gist 重新上传本机数据 */
     async 'gist-new'(el) {
       if (!S().gistToken) { toast(t('gistNeedToken'), 'err'); return; }
-      if (!(await confirmDialog({ title: t('gistNewT'), msg: t('gistNewM'), ok: t('gistNew'), danger: false }))) return;
+      const demo = !!DB.meta.demo;
+      if (!(await confirmDialog({ title: t('gistNewT'), msg: demo ? t('gistNewDemoM') : t('gistNewM'), ok: t('gistNew'), danger: false }))) return;
+      if (demo) blankBook();   // 演示数据不上传：新 Gist 从空白账本开始
       el.disabled = true; el.classList.add('spin');
       const oldId = S().gistId;
       try {
         S().gistId = ''; if (!DB.meta.updatedAt) markDirty();
-        await pushCloud(true); SYNC.state = 'ok'; SYNC.lastErr = ''; save(); renderPage(); renderSyncBtn();
+        await pushCloud(true); SYNC.state = 'ok'; SYNC.lastErr = ''; save(); renderAll();
         toast(t('gistNewDone', { id: S().gistId }), 'ok');
       } catch (e) { S().gistId = oldId; toast(t('syncFail') + ' · ' + syncErrText(e), 'err'); el.disabled = false; el.classList.remove('spin'); }
     },
