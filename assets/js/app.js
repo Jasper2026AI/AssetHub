@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter'];
+  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
 
   const ICON = {
@@ -252,7 +252,7 @@
   async function encodeCloud(text) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(S().syncKey), new TextEncoder().encode(text));
-    return JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, iv: b64(iv), data: b64(ct) });
+    return JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, pc: S().passChangedAt || 0, iv: b64(iv), data: b64(ct) });
   }
   async function decryptWith(raw, env) {
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, await aesKey(raw), unb64(env.data));
@@ -276,6 +276,11 @@
     const obj = JSON.parse(text);
     if (!isEnc(obj)) return obj;
     if (S().syncKey) { try { return JSON.parse(await decryptWith(S().syncKey, obj)); } catch (e) { /* 密钥不对 */ } }
+    // 云端还是本机改密码之前的旧密码加密的：用本机记住的旧密钥解开，然后用新密码重新加密上传
+    // （仅当本机改密码的时间比云端加密时用的密码更新时才这么做，否则说明是别的设备后来改了密码，要用新密码）
+    if (opt.old || (S().passChangedAt || 0) > (obj.pc || 0)) for (const pk of (S().syncKeyPrev || [])) {
+      try { const d = JSON.parse(await decryptWith(pk, obj)); if (!opt.old) SYNC.reenc = true; return d; } catch (e) { /* 继续 */ }
+    }
     if (!opt.interactive) throw new Error('NEED_PASS');
     for (let i = 0; i < 3; i++) {
       const r = await passDialog(t('cloudPassT'), i ? t('passWrongRetry') : t(opt.old ? 'cloudPassOldM' : 'cloudPassM'), ['cur']);
@@ -283,9 +288,20 @@
       let raw, data;
       try { raw = await deriveKeyRaw(r.cur, obj.salt, obj.iter); data = JSON.parse(await decryptWith(raw, obj)); } catch (e) { continue; }
       if (!opt.old) {
-        const h = await hashPass(r.cur), changed = !!S().passHash && S().passHash !== h;
-        S().syncKey = raw; S().syncSalt = obj.salt; S().syncIter = obj.iter || ENC_ITER; S().passHash = h; unlockFor(); save();
-        toast(changed ? t('passSyncedChanged') : t('passSynced'), 'ok');
+        const h = await hashPass(r.cur);
+        if (!S().passHash || S().passHash === h) {                    // 新设备 / 密码本来就一样：直接采用
+          S().syncKey = raw; S().syncSalt = obj.salt; S().syncIter = obj.iter || ENC_ITER; S().passHash = h; S().passChangedAt = obj.pc || 0;
+          unlockFor(); save(); toast(t('passSynced'), 'ok');
+        } else {
+          // 本机密码和云端不同：以“最后修改的密码”为准；无法判断时问你
+          const lp = S().passChangedAt || 0, cp = obj.pc || 0;
+          const useLocal = lp !== cp ? lp > cp : await confirmDialog({ title: t('passPickT'), msg: t('passPickM'), ok: t('passUseLocal'), cancel: t('passUseCloud'), danger: false, noBackdrop: true });
+          if (useLocal) { SYNC.reenc = true; S().passChangedAt = Date.now(); save(); toast(t('passKeepLocal'), 'ok'); }   // 标记为最新，其他设备会自动采用
+          else {
+            S().syncKey = raw; S().syncSalt = obj.salt; S().syncIter = obj.iter || ENC_ITER; S().passHash = h; S().passChangedAt = cp;
+            unlockFor(); save(); toast(t('passSyncedChanged'), 'ok');
+          }
+        }
       }
       return data;
     }
@@ -417,10 +433,12 @@
         if (action === 'pull') { applyCloud(cloud); logOp('system', null, 'cloudPull'); S().gistLast = Date.now(); save(); renderAll(); toast(t('syncPulled'), 'ok'); }
         else if (action === 'push') { await pushCloud(inter); save(); if (!opt.silent) toast(t('syncPushed'), 'ok'); }
         else { S().gistLast = Date.now(); save(); if (!opt.silent) toast(t('syncUpToDate'), 'ok'); }
+        if (SYNC.reenc && action !== 'push') { await pushCloud(inter); save(); toast(t('reencDone'), 'ok'); }
       }
+      SYNC.reenc = false;
       SYNC.state = 'ok'; SYNC.lastErr = '';
     } catch (e) {
-      SYNC.state = 'err'; SYNC.lastErr = syncErrText(e);
+      SYNC.reenc = false; SYNC.state = 'err'; SYNC.lastErr = syncErrText(e);
       if (!opt.silent && e.message !== 'CANCEL') toast(t('syncFail') + ' · ' + SYNC.lastErr, 'err');
     }
     SYNC.busy = false; SYNC.lastCheck = Date.now(); renderSyncBtn();
@@ -1625,11 +1643,12 @@
     if (hasOld && (await hashPass(r.old)) !== S().passHash) { toast(t('passWrong'), 'err'); return false; }
     if (!r.new || r.new.length < 4) { toast(t('passShort'), 'err'); return false; }
     if (r.new !== r.confirm) { toast(t('passMismatch'), 'err'); return false; }
-    S().passHash = await hashPass(r.new);
+    S().passHash = await hashPass(r.new); S().passChangedAt = Date.now();
+    if (S().syncKey) S().syncKeyPrev = [S().syncKey].concat(S().syncKeyPrev || []).slice(0, 3);   // 记住旧密钥，用来读取还没重新加密的云端数据
     try { await setSyncKey(r.new); } catch (e) { /* 浏览器不支持加密时仅设置锁定密码 */ }
     unlockFor();
     save(); toast(t('passSaved'), 'ok');
-    if (syncReady()) { markDirty(); save(); scheduleSync(); }   // 用新密码重新加密云端数据
+    if (syncReady()) { SYNC.reenc = true; clearTimeout(SYNC.timer); syncNow({ silent: true, interactive: true }); }   // 立即用新密码重新加密云端
     return true;
   }
   function unlockFor() {
