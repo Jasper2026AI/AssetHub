@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1423,8 +1423,8 @@
     return `<label class="mini-select ${compact ? 'th-select' : ''}">${compact ? '' : ic('bolt')}<select data-change="holdSrc">${['all', 'online', 'manual'].map(v =>
       `<option value="${v}" ${H.src === v ? 'selected' : ''}>${v === 'all' ? (compact ? t('colSrc') : t('srcAll')) : v === 'online' ? t('srcOnline') : t('srcManual')} (${n[v]})</option>`).join('')}</select></label>`;
   }
-  /** 行情来源单元格：标签 + 在线资产的“立即同步”按钮 */
-  const srcCell = a => srcBadge(a) + (isOnlineSrc(a) && !UI.hold.batch ? `<button class="src-sync" data-action="sync-one" data-id="${a.id}" title="${t('syncOneTip')}">${ic('refresh')}</button>` : '');
+  /** 行情来源单元格 */
+  const srcCell = a => srcBadge(a);
   function srcBadge(a) {
     const online = a.source === 'online' && Api.canQuote(a), err = online && a.lastErr;
     const title = online ? `${t('updatedAt')}: ${dateTimeStr(a.updatedAt)}${err ? ' · ' + errText({ message: a.lastErr }) : ''}` : '';
