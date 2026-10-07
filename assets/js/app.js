@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2883,6 +2883,24 @@
   // 升级前就填过行情 Key 的设备：标记一次，让 Key 同步到其他设备
   if (!S().keysAt && API_KEYS.some(k => S()[k])) { S().keysAt = 1; save(); }   // 很小的时间戳：只补给没有 Key 的设备，不覆盖别处的新 Key
   if (S().autoSync && syncReady()) setTimeout(() => syncNow({ silent: true }), 400);   // 打开页面先拉取云端最新数据
+  // 新版本检查：GitHub Pages 会让浏览器缓存页面约 10 分钟，这里绕过缓存读取 version.json，有新版就提示一键更新
+  async function checkUpdate() {
+    if (!/^https?:/.test(location.protocol)) return;
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      const v = String((await r.json()).v || '');
+      if (v && v !== APP_VER && !document.getElementById('upd-bar')) {
+        const bar = document.createElement('div');
+        bar.id = 'upd-bar'; bar.className = 'upd-bar';
+        bar.innerHTML = `<span>${t('newVer', { v: esc(v) })}</span><button class="btn btn-accent sm">${ic('refresh')}${t('newVerBtn')}</button>`;
+        bar.querySelector('button').addEventListener('click', () => { location.replace(location.pathname + '?v=' + encodeURIComponent(v) + location.hash); });
+        document.body.appendChild(bar);
+      }
+    } catch (e) { /* 离线或本地文件打开时忽略 */ }
+  }
+  setTimeout(checkUpdate, 1500);
+  setInterval(checkUpdate, 10 * 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
   bindEvents();
   setupAutoRefresh();
   (async () => {
