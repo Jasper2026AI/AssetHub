@@ -2078,12 +2078,17 @@
       }
     });
   }
+  /** 清理粘贴进来的 API Key：去掉空格、换行、引号、零宽字符和全角字符（只保留英文字母、数字和 - _） */
+  const cleanKey = v => String(v || '').normalize('NFKC').replace(/^(token|apikey|api_key|key)\s*[:=]\s*/i, '').replace(/[^A-Za-z0-9_\-]/g, '');
   function errText(e) {
     const m = (e && e.message) || '';
     if (m === 'NO_KEY') return t('errNoKey');
     if (m === 'MANUAL') return t('errManual');
     if (m === 'NEED_CODE') return t('errNeedCode');
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return t('errFetch') + ' · ' + t('errNetwork');
+    if (/HTTP 401|Invalid API key/i.test(m)) return t('errKey401');
+    if (/HTTP 429|limit/i.test(m)) return t('errKey429');
+    if (/HTTP 403/i.test(m)) return t('errKey403');
     return t('errFetch') + (m ? ' · ' + m : '');
   }
 
@@ -2682,8 +2687,8 @@
       if (el.dataset.set) {
         const k = el.dataset.set;
         const old = S()[k];
-        S()[k] = el.type === 'checkbox' ? el.checked : (k === 'autoRefresh' || k === 'lockMinutes') ? +el.value : k === 'gistId' ? Api.gistIdOf(el.value) : k === 'gistToken' ? Api.cleanToken(el.value) : el.value.trim();
-        if (k === 'gistId' || k === 'gistToken') el.value = S()[k];
+        S()[k] = el.type === 'checkbox' ? el.checked : (k === 'autoRefresh' || k === 'lockMinutes') ? +el.value : k === 'gistId' ? Api.gistIdOf(el.value) : k === 'gistToken' ? Api.cleanToken(el.value) : /Key$/.test(k) ? cleanKey(el.value) : el.value.trim();
+        if (k === 'gistId' || k === 'gistToken' || /Key$/.test(k)) el.value = S()[k];
         if (old === S()[k]) return;                                // 值没变（例如失焦时重复触发）就什么都不做
         if (k === 'gistId') S().syncedStamp = 0;                 // 换了 Gist 视为全新同步
         save();
