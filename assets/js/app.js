@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -102,7 +102,7 @@
     return {
       lang: 'zh', ccy: 'USD', layout: 'desktop',
       pnlStyle: 'ios', pnlSwap: false,
-      cryptoSrc: 'binance', stockSrc: 'finnhub', finnhubKey: '', twelveKey: '', avKey: '',
+      cryptoSrc: 'binance', goldSrc: 'goldapi', stockSrc: 'finnhub', finnhubKey: '', twelveKey: '', avKey: '',
       fxSrc: 'erapi', autoRefresh: 5,
       trendMode: 'asset', chartRange: 'month', yStep: 'auto',
       assetRange: 'month', kSpan: '3M', kStyle: 'candle', rankCls: 'all', moveCls: 'all', rankSort: 'desc', moveSort: 'desc', rankMode: 'day', leftMode: 'alloc',
@@ -1643,12 +1643,13 @@
           <p class="set-desc">${t('setQuoteSub')}</p>
           <div class="field"><label>${t('cryptoSrc')}</label><select class="input" data-set="cryptoSrc">${Object.keys(Api.CRYPTO_SOURCES).map(k => `<option value="${k}" ${s.cryptoSrc === k ? 'selected' : ''}>${Api.CRYPTO_SOURCES[k].name}</option>`).join('')}</select>
             <div class="hint">${t('cryptoSrcHint')}</div></div>
+          <div class="field"><label>${t('goldSrc')}</label><select class="input" data-set="goldSrc">${Object.keys(Api.GOLD_SOURCES).map(k => `<option value="${k}" ${(s.goldSrc || 'goldapi') === k ? 'selected' : ''}>${t('goldSrc_' + k)}</option>`).join('')}</select>
+            <div class="hint">${t('goldSrcHint')}</div></div>
           <div class="row2">
             <div class="field"><label>${t('stockSrc')}</label><select class="input" data-set="stockSrc">${Object.keys(Api.STOCK_SOURCES).map(k => `<option value="${k}" ${s.stockSrc === k ? 'selected' : ''}>${Api.STOCK_SOURCES[k].name}</option>`).join('')}</select></div>
             <div class="field"><label>${stockSrc.name} API Key</label><input class="input" type="password" data-set="${stockSrc.keyField}" value="${esc(s[stockSrc.keyField])}" placeholder="${t('apiKeyPh')}" autocomplete="off"></div>
           </div>
           <div class="hint" style="margin:-6px 0 14px">${t('stockSrcHint')} <a href="${stockSrc.signup}" target="_blank" rel="noopener">${t('getKey')} ${stockSrc.name} ↗</a></div>
-          <div class="field"><label>${t('goldSrc')}</label><div class="fx-box">${t('goldSrcDesc')}</div></div>
           <div class="row2">
             <div class="field"><label>${t('fxSrc')}</label><select class="input" data-set="fxSrc">${Object.keys(Api.FX_SOURCES).map(k => `<option value="${k}" ${s.fxSrc === k ? 'selected' : ''}>${Api.FX_SOURCES[k].name}</option>`).join('')}</select></div>
             <div class="field"><label>${t('autoRefresh')}</label><select class="input" data-set="autoRefresh">${[0, 1, 5, 15, 30, 60].map(n => `<option value="${n}" ${+s.autoRefresh === n ? 'selected' : ''}>${n ? t('everyMin', { n }) : t('off')}</option>`).join('')}</select></div>
@@ -2751,7 +2752,7 @@
       const rows = await Promise.all([
         row(t('fxSrc'), Api.fetchRates(S().fxSrc).then(r => `1 USD = ${fmtNum(r.rates.CNY, 4, 4)} CNY`)),
         row('BTC/USDT', Api.cryptoPriceUSD('BTC', S().cryptoSrc).then(v => '$' + fmtNum(v, 2, 2))),
-        row(t('goldSrc') + ' (PAXG)', Api.cryptoPriceUSD('PAXG', S().cryptoSrc).then(v => '$' + fmtNum(v, 2, 2) + ' / oz')),
+        row(t('goldSrc') + ' (CNY)', Api.goldQuote('CNY', S()).then(q => `${q.ccy === 'CNY' ? '¥' : q.ccy + ' '}${fmtNum(q.price / Api.OZ_G, 2, 2)} / g · ${fmtNum(q.price, 2, 2)} / oz`)),
         row('AAPL', Api.stockQuote('AAPL', S()).then(v => '$' + fmtNum(v.price, 2, 2)))
       ]);
       out.innerHTML = rows.join('');

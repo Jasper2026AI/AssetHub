@@ -210,14 +210,45 @@
     }
     if (k === 'stock') return await stockQuote(a.code, S);
     if (k === 'gold') {
-      const q = await cryptoQuote('PAXG', S.cryptoSrc);
       const unit = a.unit || 'oz';
       const f = unit === 'g' ? 1 / OZ_G : unit === 'kg' ? 1000 / OZ_G : 1;
-      return { price: q.price * f, prev: q.prev * f, ccy: 'USD' };
+      const q = await goldQuote(a.ccy || 'USD', S);
+      return { price: q.price * f, prev: q.prev * f, ccy: q.ccy };
     }
     throw new Error('MANUAL');
   }
   const canQuote = a => !!quoteKind(a);
+
+  /* ---------------- 黄金 ----------------
+     goldapi：gold-api.com 国际现货金价，可直接按 CNY / USD / HKD 等币种报价（每金衡盎司），免费、无需 Key
+     paxg   ：Binance PAXG/USDT（1 PAXG = 1 盎司），USD 报价，再按汇率换算
+     今日涨跌的起点：goldapi 没有开盘价，借用 PAXG 的“今开 / 现价”比例推算 */
+  const GOLD_SOURCES = {
+    goldapi: { name: 'gold-api.com（现货金价，支持 CNY 直接报价）' },
+    paxg: { name: 'Binance PAXG/USDT（USD，按汇率换算）' }
+  };
+  const GOLD_CCYS = ['USD', 'CNY', 'HKD', 'TWD', 'EUR', 'GBP', 'JPY', 'SGD', 'AUD', 'CAD', 'CHF', 'KRW', 'MYR', 'THB'];
+  async function goldApiQuote(ccy) {
+    const c = GOLD_CCYS.includes(ccy) ? ccy : 'USD';
+    const j = await fetchJSON(`https://api.gold-api.com/price/XAU/${c}`, { timeout: 12000 });
+    if (!(+j.price > 0)) throw new Error('No data');
+    return { price: +j.price, ccy: (j.currency || c).toUpperCase() };
+  }
+  /** 黄金每盎司报价：{ price, prev, ccy } */
+  async function goldQuote(ccy, S) {
+    const src = (S && S.goldSrc) || 'goldapi';
+    let paxg = null;
+    try { paxg = await cryptoQuote('PAXG', S && S.cryptoSrc); } catch (e) { /* PAXG 不可用时没有今开 */ }
+    if (src === 'goldapi') {
+      try {
+        const g = await goldApiQuote(ccy);
+        const ratio = paxg && paxg.price > 0 && paxg.prev > 0 ? paxg.prev / paxg.price : 0;
+        return { price: g.price, prev: ratio ? g.price * ratio : 0, ccy: g.ccy };
+      } catch (e) { if (!paxg) throw e; }   // gold-api 失败：退回 PAXG
+    }
+    if (!paxg) throw new Error('No data');
+    return { price: paxg.price, prev: paxg.prev, ccy: 'USD' };
+  }
 
   /* ---------------- GitHub Gist 同步 ---------------- */
   const GIST_FILE = 'assethub.json';
@@ -295,6 +326,6 @@
   window.AVApi = {
     FX_SOURCES, CRYPTO_SOURCES, STOCK_SOURCES,
     fetchRates, cryptoQuote, cryptoPriceUSD, stockQuote, stockCcy, quoteAsset, quoteKind, canQuote, isGold, OZ_G,
-    gistPush, gistPull, gistIdOf, cleanToken, gistHistory, gistVersion
+    gistPush, gistPull, gistIdOf, cleanToken, gistHistory, gistVersion, GOLD_SOURCES, goldQuote
   };
 })();

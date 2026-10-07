@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    goldSrc_goldapi: 'gold-api.com 现货金价（可直接按人民币报价）', goldSrc_paxg: 'Binance PAXG（美元报价，按汇率换算）', goldSrcHint: '黄金资产代码填 XAU。gold-api.com 按资产的计价货币直接报价（如选 CNY、单位选克，就是人民币/克）；它是国际现货价，与上海金交所 Au99.99 可能有少量溢价差。取不到时自动改用 PAXG。',
     unitPh: '如 g、oz、份、股', unitPresets: '件,份,股,枚,张,手', qtyPh: '不填则按 1 份计，单价即总市值',
     whAll: '全部仓库', whNone: '未填写', showHide: '显示 / 隐藏',
     newVer: '有新版本 v{v}', newVerBtn: '立即更新',
@@ -176,7 +177,7 @@ window.AV_I18N = {
     cryptoSrc: '加密货币行情', cryptoSrcHint: '若所在地区无法访问 api.binance.com，可切换为 Binance 行情镜像或 OKX。',
     stockSrc: '股票 / 基金行情', apiKeyPh: '粘贴免费 API Key', getKey: '免费注册',
     stockSrcHint: '股票与基金接口需要免费注册获取 Key（Finnhub 免费版 60 次/分钟，推荐）。',
-    goldSrc: '黄金行情', goldSrcDesc: '通过加密行情源获取 <b>PAXG/USDT</b>（1 PAXG = 1 金衡盎司实物黄金，价格紧贴国际金价），无需 Key。黄金资产代码填 <b>XAU</b> 并选择单位即可自动换算。',
+    goldSrc: '黄金行情', goldSrcDesc: '默认用 <b>gold-api.com</b> 国际现货金价，可直接按人民币等币种报价，无需 Key；取不到时改用 <b>Binance PAXG</b>（1 PAXG = 1 金衡盎司）。黄金资产代码填 XAU，选好计价货币和单位（克 / 盎司 / 千克）即可自动换算。',
     fxSrc: '汇率来源', fxNow: '当前汇率', fxDefault: '内置默认汇率（尚未联网更新）', updateFx: '更新汇率',
     autoRefresh: '自动刷新行情', off: '关闭', everyMin: '每 {n} 分钟',
     testApi: '测试连接', testing: '测试中…',
@@ -193,6 +194,7 @@ window.AV_I18N = {
   },
 
   en: {
+    goldSrc_goldapi: 'gold-api.com spot gold (quotes directly in CNY etc.)', goldSrc_paxg: 'Binance PAXG (USD, converted by FX)', goldSrcHint: 'Use code XAU. gold-api.com quotes in the asset’s currency (CNY + gram = CNY per gram). It is international spot and may differ slightly from SGE Au99.99. Falls back to PAXG if unavailable.',
     unitPh: 'e.g. g, oz, units, shares', unitPresets: 'pc,units,shares,coins', qtyPh: 'Leave empty to treat as 1 lot (price = total value)',
     whAll: 'All custodies', whNone: 'Not set', showHide: 'Show / hide',
     newVer: 'New version v{v} available', newVerBtn: 'Update now',
@@ -352,7 +354,7 @@ window.AV_I18N = {
     cryptoSrc: 'Crypto quotes', cryptoSrcHint: 'If api.binance.com is blocked in your region, switch to the Binance mirror or OKX.',
     stockSrc: 'Stock / fund quotes', apiKeyPh: 'Paste free API key', getKey: 'Get a free key —',
     stockSrcHint: 'Stock and fund APIs need a free key (Finnhub free tier: 60 calls/min, recommended).',
-    goldSrc: 'Gold quotes', goldSrcDesc: 'Uses <b>PAXG/USDT</b> from the crypto source (1 PAXG = 1 troy oz of physical gold, tracks spot closely). No key needed. Use code <b>XAU</b> and pick a unit.',
+    goldSrc: 'Gold quotes', goldSrcDesc: 'Uses <b>gold-api.com</b> spot gold by default, quoted directly in CNY and other currencies, no key needed; falls back to <b>Binance PAXG</b> (1 PAXG = 1 troy oz). Use code XAU and pick the currency and unit (g / oz / kg).',
     fxSrc: 'FX source', fxNow: 'Current rates', fxDefault: 'Built-in defaults (not yet updated online)', updateFx: 'Update FX',
     autoRefresh: 'Auto refresh', off: 'Off', everyMin: 'Every {n} min',
     testApi: 'Test connection', testing: 'Testing…',

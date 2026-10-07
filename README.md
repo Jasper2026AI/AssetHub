@@ -38,7 +38,7 @@ AssetHub/
 |---|---|---|
 | 汇率 | open.er-api.com（备用 jsDelivr currency-api） | 不需要 |
 | 加密 | Binance（备用 Binance 镜像 / OKX） | 不需要 |
-| 黄金 | Binance PAXG/USDT（1 PAXG = 1 金衡盎司），代码填 XAU | 不需要 |
+| 黄金 | gold-api.com 现货金价（可直接按 CNY 等币种报价），备用 Binance PAXG/USDT；代码填 XAU | 不需要 |
 | 股票 / 基金 | Finnhub（推荐）/ Twelve Data / Alpha Vantage | 需要免费注册 |
 
 Finnhub Key：https://finnhub.io/register 注册 → 复制 API Key → 粘到「数据设置 → 行情源配置」。
