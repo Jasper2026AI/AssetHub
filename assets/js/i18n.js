@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    errTimeout: '请求超时，请检查网络后重试', errNoQuote: '没有查到这个代码的行情：请检查代码是否正确（美股如 AAPL，港股如 0700.HK，台股如 2330.TW），或改为手动维护', syncEEmpty: 'Gist 里没有 AssetHub 的数据，请检查 Gist ID', syncEOther: '未知错误，请稍后重试',
     errCryptoNF: '加密货币行情里找不到这个代码。如果它是股票或基金（如 GOOGL、AAPL），请把资产类别改成「股票」或「基金」；如果是币，请确认代码（如 BTC、ETH）', stockHint: '已按股票行情获取，建议把类别改成「股票」',
     errKey401: 'API Key 无效（HTTP 401）。请到 Finnhub 网站 Dashboard 复制 “API Key” 那一栏（不是下面的 Webhook Secret），粘贴后点「测试连接」；刚注册的账号需先点邮箱里的验证链接', errKey429: '请求太频繁或超过免费额度（HTTP 429），请稍后再试', errKey403: '没有权限（HTTP 403）：免费账号可能不支持这个市场（如港股 / 台股），可改为手动维护',
     passPickT: '本机密码和云端不同', passPickM: '云端数据是用另一个密码加密的（你刚输入的就是它）。以哪个密码为准？选「本机密码」会用本机密码重新加密云端，其他设备下次同步要输入本机密码。', passUseLocal: '以本机密码为准', passUseCloud: '以云端密码为准', passKeepLocal: '保留本机密码，云端将用它重新加密', reencDone: '云端数据已用新密码重新加密',
@@ -185,6 +186,7 @@ window.AV_I18N = {
   },
 
   en: {
+    errTimeout: 'Request timed out. Check your connection and retry', errNoQuote: 'No quote found for this code. Check it (US: AAPL, HK: 0700.HK, TW: 2330.TW) or switch to manual pricing', syncEEmpty: 'This Gist has no AssetHub data. Check the Gist ID', syncEOther: 'Unknown error, please retry later',
     errCryptoNF: 'This code isn’t a listed crypto. If it is a stock or fund (e.g. GOOGL, AAPL), set the class to Stock or Fund; for coins, check the code (e.g. BTC, ETH)', stockHint: 'Fetched as a stock quote; consider setting the class to Stock',
     errKey401: 'Invalid API key (HTTP 401). Copy the “API Key” from your Finnhub dashboard (not the Webhook Secret). New accounts must verify their email first', errKey429: 'Rate limit or free quota exceeded (HTTP 429). Try again later', errKey403: 'Forbidden (HTTP 403): the free plan may not cover this market (e.g. HK / TW). Use manual pricing instead',
     passPickT: 'Password differs from the cloud', passPickM: 'The cloud data is encrypted with another password (the one you just entered). Which one should win? “This device” re-encrypts the cloud with this device’s password.', passUseLocal: 'Use this device’s password', passUseCloud: 'Use the cloud password', passKeepLocal: 'Keeping this device’s password; the cloud will be re-encrypted', reencDone: 'Cloud data re-encrypted with the new password',

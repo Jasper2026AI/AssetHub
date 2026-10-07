@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '3.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '3.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -296,7 +296,7 @@
     if (!S().passHash) { if (!(await setPasswordFlow(t('syncSetPassMsg')))) throw new Error('CANCEL'); if (S().syncKey) return; }
     const r = await passDialog(t('syncEncT'), t('syncEncM'), ['cur']);
     if (!r) throw new Error('CANCEL');
-    if ((await hashPass(r.cur)) !== S().passHash) throw new Error(t('passWrong'));
+    if ((await hashPass(r.cur)) !== S().passHash) throw new Error('PASS_WRONG');
     await setSyncKey(r.cur); save();
   }
   /** 云端文本 → 数据对象。加密数据先用本机密钥解；解不开（新设备 / 别的设备改过密码）就请你输入密码。
@@ -335,7 +335,7 @@
       }
       return data;
     }
-    throw new Error(t('passWrong'));
+    throw new Error('PASS_WRONG');
   }
 
   /* ================= 本机自动备份（加载演示 / 导入 / 清空 / 云端覆盖 / 恢复 之前） ================= */
@@ -419,7 +419,7 @@
             b.disabled = true; b.classList.add('spin');
             try {
               const obj = await decodeCloud(await Api.gistVersion(S().gistToken, S().gistId, sha), { interactive: true, old: true });
-              if (!validData(obj)) throw new Error(t('importBad'));
+              if (!validData(obj)) throw new Error('BAD_DATA');
               cache[sha] = obj;
               const sEl = $('#rcs-' + sha, m); if (sEl) sEl.innerHTML = dataSummary(obj);
               b.textContent = t('restore');
@@ -447,7 +447,7 @@
       } else {
         SYNC.phase = 'pull';
         const cloud = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: inter });
-        if (!validData(cloud)) throw new Error(t('importBad'));
+        if (!validData(cloud)) throw new Error('BAD_DATA');
         const keysPush = mergeKeys(cloud);
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
         const cloudNew = (cStamp > (S().syncedStamp || 0) && cStamp !== DB.meta.updatedAt) || (!cStamp && !S().syncedStamp && !localDirty && (cloud.assets.length || cloud.txs.length));
@@ -472,32 +472,38 @@
       SYNC.reenc = false;
       SYNC.state = 'ok'; SYNC.lastErr = '';
     } catch (e) {
-      SYNC.reenc = false; SYNC.state = 'err'; SYNC.lastErr = syncErrText(e);
-      if (!opt.silent && e.message !== 'CANCEL') toast(t('syncFail') + ' · ' + SYNC.lastErr, 'err');
+      SYNC.reenc = false; SYNC.state = 'err'; SYNC.lastErr = (e && e.message) || 'error'; SYNC.lastPhase = SYNC.phase;   // 存原始错误，显示时按当前语言翻译
+      if (!opt.silent && e.message !== 'CANCEL') toast(t('syncFail') + ' · ' + syncErrNow(), 'err');
     }
     SYNC.busy = false; SYNC.lastCheck = Date.now(); renderSyncBtn();
     if (UI.page === 'settings') renderPage();
   }
   /** 把 GitHub 错误码翻译成看得懂的原因 */
-  function syncErrText(e) {
+  function syncErrText(e, phase) {
     const m = String((e && e.message) || 'error'), code = (m.match(/HTTP (\d{3})/) || [])[1];
     if (m === 'NEED_PASS') return t('syncNeedPass');
     if (m === 'CANCEL') return t('syncCanceled');
     if (m === 'DEMO_BLOCK') return t('syncDemoBlock');
+    if (m === 'PASS_WRONG') return t('passWrong');
+    if (m === 'BAD_DATA') return t('importBad');
     if (code === '401') return t('syncE401');
     if (code === '404') return t('syncE404');
     if (code === '403') return t('syncE403');
     if (code === '422') return t('syncE422');
-    if (code && code[0] === '5') return t('syncE5xx', { c: code, p: t(SYNC.phase === 'pull' ? 'phasePull' : 'phasePush') }) + ((m.match(/req:(\S+)/) || [])[1] ? ` [${m.match(/req:(\S+)/)[1]}]` : '');
+    if (code && code[0] === '5') return t('syncE5xx', { c: code, p: t((phase || SYNC.phase) === 'pull' ? 'phasePull' : 'phasePush') }) + ((m.match(/req:(\S+)/) || [])[1] ? ` [${m.match(/req:(\S+)/)[1]}]` : '');
     if (/Timeout|Failed to fetch|NetworkError|Load failed/i.test(m)) return t('syncENet');
-    return m;
+    if (/Empty gist/i.test(m)) return t('syncEEmpty');
+    if (/Unexpected token|JSON/i.test(m)) return t('importBad');
+    if (code) return t('syncEOther') + ' (HTTP ' + code + ')';
+    return /[\u4e00-\u9fff]/.test(m) === (S().lang === 'zh') ? m : t('syncEOther');   // 不显示与当前语言不符的原始报错
   }
+  const syncErrNow = () => (SYNC.lastErr ? syncErrText({ message: SYNC.lastErr }, SYNC.lastPhase) : '');
   function syncBtnHTML() {
     let st = 'off', tip = t('syncOff');
     if (syncReady() || S().gistToken) {
       const dirty = (DB.meta.updatedAt || 0) > (S().syncedStamp || 0);
       st = SYNC.busy ? 'busy' : SYNC.state === 'err' ? 'err' : dirty ? 'dirty' : 'ok';
-      tip = SYNC.busy ? t('syncing') : st === 'err' ? t('syncFail') + ' · ' + SYNC.lastErr : st === 'dirty' ? t('syncDirty') : `${t('syncOk')} · ${dateTimeStr(S().gistLast)}`;
+      tip = SYNC.busy ? t('syncing') : st === 'err' ? t('syncFail') + ' · ' + syncErrNow() : st === 'dirty' ? t('syncDirty') : `${t('syncOk')} · ${dateTimeStr(S().gistLast)}`;
     }
     return `<button class="icon-btn sync-btn st-${st} ${st === 'busy' ? 'spin' : ''}" data-action="sync-now" title="${esc(tip)}">${ic('cloud')}<i class="sdot"></i></button>`;
   }
@@ -1351,7 +1357,7 @@
   const unitSuffix = a => (a.unit && !isBalance(a) && (hasTag(a, 'gold') || hasTag(a, 'physical')) ? ` <span class="dim">${t('unitS_' + a.unit)}</span>` : '');
   function srcBadge(a) {
     const online = a.source === 'online' && Api.canQuote(a), err = online && a.lastErr;
-    const title = online ? `${t('updatedAt')}: ${dateTimeStr(a.updatedAt)}${err ? ' · ' + a.lastErr : ''}` : '';
+    const title = online ? `${t('updatedAt')}: ${dateTimeStr(a.updatedAt)}${err ? ' · ' + errText({ message: a.lastErr }) : ''}` : '';
     return `<span class="src ${online ? 'online' : ''} ${err ? 'err' : ''}" title="${esc(title)}"><i></i>${online ? t('srcOnline') : t('srcManual')}</span>`;
   }
   /** 批量操作条（资产 / 记账共用） */
@@ -1541,7 +1547,7 @@
             <button class="btn btn-glass" data-action="gist-new">${ic('plus')}${t('gistNew')}</button>
           </div>
           <div class="hint" style="margin-top:10px">${ic('lock')} ${S().syncKey ? t('encOn') : t('encOff')}</div>
-          ${SYNC.state === 'err' && SYNC.lastErr ? `<div class="hint down" style="margin-top:10px">${t('syncFail')} · ${esc(SYNC.lastErr)}</div>` : ''}
+          ${SYNC.state === 'err' && SYNC.lastErr ? `<div class="hint down" style="margin-top:10px">${t('syncFail')} · ${esc(syncErrNow())}</div>` : ''}
           <div class="hint" style="margin-top:12px">${t('lastSync')}: ${s.gistLast ? new Date(s.gistLast).toLocaleString(locale(), { hour12: false }) : t('never')}</div>
         </div>
       </div>
@@ -2114,17 +2120,20 @@
   }
   /** 清理粘贴进来的 API Key：去掉空格、换行、引号、零宽字符和全角字符（只保留英文字母、数字和 - _） */
   const cleanKey = v => String(v || '').normalize('NFKC').replace(/^(token|apikey|api_key|key)\s*[:=]\s*/i, '').replace(/[^A-Za-z0-9_\-]/g, '');
+  /** 行情 / 汇率报错 → 当前语言的说明（不直接显示接口返回的英文原文） */
   function errText(e) {
-    const m = (e && e.message) || '';
+    const m = String((e && e.message) || ''), code = (m.match(/HTTP (\d{3})/) || [])[1];
     if (m === 'NO_KEY') return t('errNoKey');
     if (m === 'MANUAL') return t('errManual');
     if (m === 'NEED_CODE') return t('errNeedCode');
     if (m === 'CRYPTO_NOT_FOUND') return t('errCryptoNF');
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return t('errFetch') + ' · ' + t('errNetwork');
-    if (/HTTP 401|Invalid API key/i.test(m)) return t('errKey401');
-    if (/HTTP 429|limit/i.test(m)) return t('errKey429');
-    if (/HTTP 403/i.test(m)) return t('errKey403');
-    return t('errFetch') + (m ? ' · ' + m : '');
+    if (/^Timeout$/i.test(m)) return t('errFetch') + ' · ' + t('errTimeout');
+    if (code === '401' || /Invalid API key|apikey.*invalid/i.test(m)) return t('errKey401');
+    if (code === '429' || /limit|frequency|per minute|per day/i.test(m)) return t('errKey429');
+    if (code === '403' || /access|premium|subscription/i.test(m)) return t('errKey403');
+    if (/No data|Not found|symbol|doesn't exist|does not exist|invalid/i.test(m) || code === '404' || code === '400') return t('errNoQuote');
+    return t('errFetch') + (code ? ' · HTTP ' + code : '');
   }
 
   /* ---- 操作记录展示 ---- */
@@ -2254,7 +2263,7 @@
   }
   async function refreshOne(a) {
     try { await quoteInto(a); save(); renderAll(); }
-    catch (e) { a.lastErr = errText(e); save(); if (UI.page === 'holdings') renderHoldBody(); }
+    catch (e) { a.lastErr = (e && e.message) || 'error'; save(); if (UI.page === 'holdings') renderHoldBody(); }
   }
   async function refreshQuotes(opt) {
     opt = opt || {};
@@ -2266,7 +2275,7 @@
     let ok = 0, fail = 0, noKey = false;
     res.forEach((r, i) => {
       if (r.status === 'fulfilled') ok++;
-      else { fail++; online[i].lastErr = errText(r.reason); if (r.reason && r.reason.message === 'NO_KEY') noKey = true; }
+      else { fail++; online[i].lastErr = (r.reason && r.reason.message) || 'error'; if (r.reason && r.reason.message === 'NO_KEY') noKey = true; }
     });
     DB.lastQuote = Date.now();
     save(); setBusy(false); renderAll();
@@ -2684,7 +2693,7 @@
       el.disabled = true; el.classList.add('spin');
       try {
         const obj = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: true });
-        if (!validData(obj)) throw new Error(t('importBad'));
+        if (!validData(obj)) throw new Error('BAD_DATA');
         applyCloud(obj); S().gistLast = Date.now(); save(); renderAll(); toast(t('gistPulled'), 'ok');
       } catch (e) { toast(t('syncFail') + ' · ' + syncErrText(e), 'err'); el.disabled = false; el.classList.remove('spin'); }
     }
