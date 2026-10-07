@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '4.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -559,7 +559,7 @@
     busy: false,
     unlockUntil: 0,
     kEnd: 0,                                            // 日K 视窗末端偏移（0 = 最新）
-    hold: { q: '', cls: 'all', src: 'all', sort: 'valDesc', batch: false, sel: new Set() },
+    hold: { q: '', cls: 'all', src: 'all', wh: '__all', sort: 'valDesc', batch: false, sel: new Set() },
     led: { mode: 'month', date: '', type: 'all', cat: 'all', acct: 'all', q: '', sort: 'dateDesc', batch: false, sel: new Set() }
   };
 
@@ -1309,6 +1309,7 @@
     const H = UI.hold, q = H.q.trim().toLowerCase();
     let list = DB.assets.filter(a => hasTag(a, H.cls));
     if (H.src !== 'all') list = list.filter(a => (isOnlineSrc(a) ? 'online' : 'manual') === H.src);
+    if (H.wh !== '__all') list = list.filter(a => (a.warehouse || '') === H.wh);
     if (q) list = list.filter(a => [a.name, a.code, a.note, a.warehouse, clsLabel(a)].some(v => String(v || '').toLowerCase().includes(q)));
     const keys = snapKeys();
     const rows = list.map(a => { const v = aValD(a), c = aCostD(a), d = dayChange(a, keys); return { a, v, pnl: isBalance(a) ? 0 : v - c, day: d.ch, dayPct: d.pct }; });
@@ -1335,6 +1336,7 @@
         <label class="search">${ic('search')}<input data-input="holdQ" value="${esc(H.q)}" placeholder="${t('holdSearchPh')}" autocomplete="off"></label>
         <label class="mini-select">${ic('sort')}<select data-change="holdSort">${['valDesc', 'valAsc', 'dayDesc', 'dayAsc', 'pnlDesc', 'pnlAsc'].map(v => `<option value="${v}" ${H.sort === v ? 'selected' : ''}>${t('sort_' + v)}</option>`).join('')}</select></label>
         <span class="src-tool">${srcFilterHTML(false)}</span>
+        <span class="src-tool">${whFilterHTML(false)}</span>
       </div>
       <div class="chips mb">${chips}</div>
       <div id="batch-bar"></div>
@@ -1397,7 +1399,7 @@
       body = `<div class="card glass table-card"><div class="table-wrap"><table class="tbl hold-tbl">
         <thead><tr>
           ${H.batch ? `<th class="ckc"><label class="ck"><input type="checkbox" data-sel-all="hold" ${allSel ? 'checked' : ''}><i></i></label></th>` : ''}
-          <th>${t('colName')}</th><th>${t('colClass')}</th><th>${t('colWh')}</th><th class="r">${t('colQty')}</th><th class="r">${t('colCost')}</th><th class="r">${t('colPrice')}</th>
+          <th>${t('colName')}</th><th>${t('colClass')}</th><th>${whFilterHTML(true)}</th><th class="r">${t('colQty')}</th><th class="r">${t('colCost')}</th><th class="r">${t('colPrice')}</th>
           ${sortHead('val', t('colValue'))}${sortHead('day', t('colDay'))}${sortHead('pnl', t('colPnl'))}<th>${srcFilterHTML(true)}</th><th class="c">${t('colOps')}</th></tr></thead>
         <tbody>${tr}</tbody>
         <tfoot><tr>${H.batch ? '<td></td>' : ''}<td colspan="6">${t('total')} · ${t('nAssets', { n: rows.length })}</td><td class="r num">${money(sumV)}</td><td class="r num ${upDown(sumDay)}">${money(sumDay, { sign: true })}</td><td class="r num ${upDown(sp)}">${money(sp, { sign: true })}<small class="${upDown(sp)}">${pct(sumC ? (sp / Math.abs(sumC)) * 100 : 0)}</small></td><td colspan="2"></td></tr></tfoot>
@@ -1422,6 +1424,16 @@
     n.manual = n.all - n.online;
     return `<label class="mini-select ${compact ? 'th-select' : ''}">${compact ? '' : ic('bolt')}<select data-change="holdSrc">${['all', 'online', 'manual'].map(v =>
       `<option value="${v}" ${H.src === v ? 'selected' : ''}>${v === 'all' ? (compact ? t('colSrc') : t('srcAll') + ` (${n.all})`) : (v === 'online' ? t('srcOnline') : t('srcManual')) + ` (${n[v]})`}</option>`).join('')}</select></label>`;
+  }
+  /** 资产仓库筛选：全部 / 每个仓库（数量）/ 未填写 */
+  function whFilterHTML(compact) {
+    const H = UI.hold, cnt = {};
+    DB.assets.forEach(a => { const w = a.warehouse || ''; cnt[w] = (cnt[w] || 0) + 1; });
+    if (H.wh !== '__all' && cnt[H.wh] == null) H.wh = '__all';   // 筛选的仓库已不存在
+    const names = Object.keys(cnt).filter(Boolean).sort((x, y) => cnt[y] - cnt[x] || x.localeCompare(y));
+    const opt = (v, label) => `<option value="${esc(v)}" ${H.wh === v ? 'selected' : ''}>${esc(label)}</option>`;
+    return `<label class="mini-select ${compact ? 'th-select' : ''}">${compact ? '' : ic('db')}<select data-change="holdWh">${
+      opt('__all', compact ? t('colWh') : `${t('whAll')} (${DB.assets.length})`) + names.map(w => opt(w, `${w} (${cnt[w]})`)).join('') + (cnt[''] ? opt('', `${t('whNone')} (${cnt['']})`) : '')}</select></label>`;
   }
   /** 行情来源单元格 */
   const srcCell = a => srcBadge(a);
@@ -1606,9 +1618,9 @@
         <div class="card glass">
           <div class="card-head"><div class="card-title"><span class="ico">${ic('cloud')}</span>${t('setSyncT')}</div></div>
           <p class="set-desc">${t('setSyncSub')}</p>
-          <div class="field"><label>${t('gistToken')}</label><input class="input" type="password" data-set="gistToken" value="${esc(s.gistToken)}" placeholder="ghp_xxx / github_pat_xxx" autocomplete="off">
+          <div class="field"><label>${t('gistToken')}</label><input class="input" type="password" data-set="gistToken" value="${esc(s.gistToken)}" placeholder="ghp_xxx / github_pat_xxx" autocomplete="new-password" data-lpignore="true">
             <div class="hint">${t('gistTokenHint')} <a href="https://github.com/settings/tokens/new?scopes=gist&description=AssetHub" target="_blank" rel="noopener">${t('createToken')} ↗</a></div></div>
-          <div class="field"><label>${t('gistId')}</label><input class="input" data-set="gistId" value="${esc(s.gistId)}" placeholder="${t('gistIdPh')}" autocomplete="off"></div>
+          <div class="field"><label class="lbl-eye">${t('gistId')}<button type="button" class="eye-btn" data-action="toggle-gistid" title="${t('showHide')}">${ic(UI.showGistId ? 'eyeoff' : 'eye')}</button></label><input class="input" type="${UI.showGistId ? 'text' : 'password'}" data-set="gistId" value="${esc(s.gistId)}" placeholder="${t('gistIdPh')}" autocomplete="new-password" data-lpignore="true" spellcheck="false"></div>
           <label class="switch-row"><span>${t('autoSync')}<small>${t('autoSyncSub')}</small></span>
             <span class="switch"><input type="checkbox" data-set="autoSync" ${s.autoSync ? 'checked' : ''}><i></i></span></label>
           <div class="btn-row">
@@ -2383,11 +2395,12 @@
   }
   const validData = o => o && typeof o === 'object' && Array.isArray(o.assets) && Array.isArray(o.txs);
   function doExport() {
-    const name = (DB.meta.name || 'AssetHub').replace(/[\\/:*?"<>|]+/g, '_');
+    const name = bookName().replace(/[\\/:*?"<>|]+/g, '_');
     const blob = new Blob([JSON.stringify(exportable(), null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${name}-${todayKey()}.json`;
+    const now = new Date(), hms = [now.getHours(), now.getMinutes(), now.getSeconds()].map(n => String(n).padStart(2, '0')).join('-');
+    a.download = `${name}-${todayKey()}_${hms}.json`;   // 例：Jasper's AssetHub-2026-10-08_03-08-12.json
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     toast(t('exported'), 'ok');
@@ -2670,6 +2683,11 @@
       if (await requireUnlock(UI.page === 'holdings' ? t('verifyAssetMsg') : null)) { refreshLockBtn(); toast(t('unlockedToast'), 'ok'); }
     },
     recover() { openRecovery(); },
+    'toggle-gistid'(el) {
+      UI.showGistId = !UI.showGistId;
+      const inp = $('[data-set="gistId"]'); if (inp) inp.type = UI.showGistId ? 'text' : 'password';
+      el.innerHTML = ic(UI.showGistId ? 'eyeoff' : 'eye');
+    },
     async 'reset-day'(el) {
       const a = findAsset(el.dataset.id); if (!a) return;
       const d = dayChange(a);
@@ -2823,6 +2841,7 @@
       if (c === 'yStep') { S().yStep = el.value; save(); drawTrend(); return; }
       if (c === 'rankCls') { S().rankCls = el.value; save(); renderRank(); return; }
       if (c === 'holdSort') { UI.hold.sort = el.value; renderHoldBody(); return; }
+      if (c === 'holdWh') { UI.hold.wh = el.value; renderHoldBody(); $$('[data-change="holdWh"]').forEach(x => { x.value = el.value; }); return; }
       if (c === 'holdSrc') { UI.hold.src = el.value; renderHoldBody(); $$('[data-change="holdSrc"]').forEach(x => { x.value = el.value; }); return; }
       if (c === 'ledCat') { UI.led.cat = el.value; renderLedBody(); return; }
       if (c === 'ledAcct') { UI.led.acct = el.value; renderLedBody(); return; }

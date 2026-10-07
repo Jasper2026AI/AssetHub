@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    whAll: '全部仓库', whNone: '未填写', showHide: '显示 / 隐藏',
     newVer: '有新版本 v{v}', newVerBtn: '立即更新',
     srcAll: '全部来源', syncOneTip: '立即同步这一项的行情（更新单价和市值）', syncOneDone: '「{n}」已更新 · 单价 {p}',
     resetDay: '清零', resetDayTip: '录错了？把这项资产今天的盈亏清零（以当前值作为今天的起点）', resetDayT: '清零「{n}」今日盈亏？', resetDayM: '当前今日盈亏 {v}。适用于录入错误或补录造成的虚假盈亏：会以当前值作为今天的起点，今日盈亏变为 0，总资产不变。真实的涨跌不要清零。', resetDayDone: '已清零今日盈亏', act_resetDay: '清零今日盈亏', fld_dayPnl: '今日盈亏',
@@ -161,7 +162,7 @@ window.AV_I18N = {
     importOk: '导入成功', importBad: '文件格式不正确', importT: '导入数据？', importM: '将用「{n}」（{a} 项资产、{x} 条记账）覆盖当前全部数据。',
     demoT: '加载演示数据？', demoM: '当前数据会被演示数据替换（会自动备份，可在「数据恢复」找回）。演示数据不会自动上传覆盖云端。', demoLoaded: '演示数据已加载',
     clearT: '清空全部本地数据？', clearM: '所有资产、记账、快照将被删除（会自动备份，可在「数据恢复」找回），也不会再加载演示数据。Token、密码等设置保留，但会断开当前 Gist（云端数据不受影响，重新填入 Gist ID 即可找回）。', cleared: '本地数据已清空',
-    defaultBookName: '我的 AssetHub', demoBookName: "Jasper's AssetHub",
+    defaultBookName: "Jasper's AssetHub", demoBookName: "Jasper's AssetHub",
 
     setSyncT: '多端同步 · GitHub Gist', setSyncSub: '把数据保存到你自己 GitHub 账号下的私有 Gist。每台设备填入同一个 Token 和 Gist ID 后会自动同步；右上角的同步按钮可随时手动同步一次。只同步资产、记账和账本信息，各设备的布局、配色、密码各自独立。Token 只保存在本机。',
     gistToken: 'GitHub Token（仅需 gist 权限）', gistTokenHint: '在 GitHub 新建 Token 时只勾选 gist 权限即可。', createToken: '一键创建 Token',
@@ -191,6 +192,7 @@ window.AV_I18N = {
   },
 
   en: {
+    whAll: 'All custodies', whNone: 'Not set', showHide: 'Show / hide',
     newVer: 'New version v{v} available', newVerBtn: 'Update now',
     srcAll: 'All sources', syncOneTip: 'Fetch this asset’s quote now (updates price and value)', syncOneDone: '“{n}” updated · price {p}',
     resetDay: 'Reset', resetDayTip: 'Entered by mistake? Reset today’s P/L for this asset (use the current value as today’s start)', resetDayT: 'Reset today’s P/L for “{n}”?', resetDayM: 'Today’s P/L is {v}. Use this when it comes from a wrong or late entry: the current value becomes today’s starting point, today’s P/L becomes 0, and total assets don’t change. Don’t reset real price moves.', resetDayDone: 'Today’s P/L reset', act_resetDay: 'Reset today’s P/L', fld_dayPnl: 'Today’s P/L',
@@ -335,7 +337,7 @@ window.AV_I18N = {
     importOk: 'Import complete', importBad: 'Invalid file format', importT: 'Import data?', importM: '“{n}” ({a} assets, {x} entries) will replace all current data.',
     demoT: 'Load demo data?', demoM: 'Current data will be replaced (auto-backed up; restore it from “Data recovery”). Demo data is never auto-uploaded to the cloud.', demoLoaded: 'Demo data loaded',
     clearT: 'Clear all local data?', clearM: 'All assets, entries and snapshots will be removed (auto-backed up in Data recovery) and no demo data is loaded. Token, password and preferences are kept, but the current Gist is disconnected (cloud data is untouched; re-enter the Gist ID to get it back).', cleared: 'Local data cleared',
-    defaultBookName: 'My AssetHub', demoBookName: "Jasper's AssetHub",
+    defaultBookName: "Jasper's AssetHub", demoBookName: "Jasper's AssetHub",
 
     setSyncT: 'Multi-device Sync · GitHub Gist', setSyncSub: 'Store your data in a private Gist under your own GitHub account, then pull it with the same Gist ID on any device. The token stays on this device and is stripped from exports.',
     gistToken: 'GitHub token (gist scope only)', gistTokenHint: 'When creating the token, tick only the “gist” scope.', createToken: 'Create token',
