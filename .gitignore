@@ -1,0 +1,6 @@
+# 防止把个人数据传到公开仓库：导出的备份文件都是 .json
+*.json
+# 系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini
