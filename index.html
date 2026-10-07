@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>AssetHub</title>
+<link rel="icon" type="image/png" href="assets/img/favicon.png">
+<link rel="apple-touch-icon" href="assets/img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+  <!-- 背景光晕 -->
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <!-- 顶部栏：图标 / 主标题 / 副标题 / 中英切换 / 币种 / 刷新行情 / 记一笔 -->
+  <header class="topbar" id="topbar"></header>
+
+  <main class="wrap">
+    <!-- 页面目录（横向靠左） + 布局切换 -->
+    <div class="navrow" id="navrow"></div>
+    <!-- 固定的四个指标卡 -->
+    <section class="kpis" id="kpis"></section>
+    <!-- 当前页面内容 -->
+    <section id="page"></section>
+    <footer class="foot" id="foot"></footer>
+  </main>
+
+  <!-- 手机端底部标签栏 -->
+  <nav class="tabbar" id="tabbar"></nav>
+
+  <div id="modal-root"></div>
+  <div id="dialog-root"></div>
+  <div id="toast-root"></div>
+  <input type="file" id="file-import" accept=".json,application/json" hidden>
+  <input type="file" id="file-icon" accept="image/*" hidden>
+
+  <script src="assets/js/i18n.js"></script>
+  <script src="assets/js/charts.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
