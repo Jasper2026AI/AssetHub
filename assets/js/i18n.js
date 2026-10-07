@@ -4,6 +4,11 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    close: '关闭', restore: '恢复', recoverT: '数据恢复', recoverIntro: '每次加载演示、导入、清空、云端覆盖或恢复之前，系统都会自动备份当前数据（本机保留最近 10 份）。云端 Gist 保存了每一次上传的历史版本。恢复前会再备份一次当前数据，可放心尝试。', recoverLocal: '本机自动备份', recoverNoLocal: '暂无本机备份', recoverLegacy: '旧版 AssetView 数据', recoverCloud: '云端历史版本（Gist）', recoverLoadCloud: '读取云端历史版本', recoverNoCloud: '未设置 Token / Gist ID，或没有历史版本', recoverView: '查看', recoverClickView: '点「查看」读取内容', restoreT: '恢复这个版本？', restoreM: '将恢复为：{s}。当前数据会先自动备份，恢复后会同步到云端。', restoreDone: '已恢复', demoTag: '演示数据', act_restore: '恢复数据',
+    bk_demo: '加载演示前', bk_import: '导入前', bk_clear: '清空前', bk_pull: '云端覆盖前', bk_restore: '恢复前',
+    syncNeedPass: '云端数据已加密，需要输入密码：点右上角云朵按钮', syncCanceled: '已取消', syncDemoBlock: '本机是演示数据，不会自动上传覆盖云端；点云朵按钮可改用云端数据', demoBlockT: '本机是演示数据', demoBlockM: '云端有你的数据（{s}）。为防止覆盖，演示数据不会上传。要用云端数据替换本机吗？', demoPushT: '上传演示数据？', demoPushM: '本机当前是演示数据，上传会覆盖云端（云端历史版本仍可在「数据恢复」找回）。确定上传？',
+    syncSetPassMsg: '同步到云端的数据会用密码加密。请先设置一个密码（同时用作锁定密码），其他设备第一次同步时输入同一个密码即可。', syncEncT: '加密同步数据', syncEncM: '从现在起云端数据会加密保存。请输入你的锁定密码（只需一次）。', cloudPassT: '输入密码解密云端数据', cloudPassM: '云端数据已加密。请输入设置时的密码；解密成功后本设备的锁定密码会自动改成同一个。', cloudPassOldM: '这个历史版本是用当时的密码加密的，请输入当时的密码。', passWrongRetry: '密码不对，请再试一次', passSynced: '密码已同步，云端数据已解密', passSyncedChanged: '已解密，本设备的锁定密码已改为与云端相同', changePassMsg: '修改后云端数据会用新密码重新加密，其他设备下次同步时需要输入新密码。', encOn: '云端数据已加密（密码与锁定密码相同）', encOff: '云端数据将在下次同步时加密（需要输入一次锁定密码）',
+    syncE401: 'Token 无效或已过期（HTTP 401），请重新生成 Token 并粘贴', syncE404: '找不到这个 Gist（HTTP 404）：检查 Gist ID，或 Token 是否勾选了 gist 权限', syncE403: '没有权限或请求太频繁（HTTP 403），请确认 Token 勾选了 gist，或稍后再试', syncE422: 'GitHub 拒绝了数据（HTTP 422），可尝试「新建 Gist」', syncE5xx: 'GitHub 服务器出错（HTTP {c}），已自动重试 3 次。请稍后再试；一直失败可点「新建 Gist」', syncENet: '网络连接失败或超时，请检查网络后重试', gistNew: '新建 Gist', gistNewT: '新建 Gist 并上传？', gistNewM: '会新建一个私密 Gist，把本机数据完整上传，并替换当前 Gist ID。其他设备需要改填新的 Gist ID。旧 Gist 不会被删除。', gistNewDone: '已新建并上传，新的 Gist ID：{id}（其他设备请改填这个）',
     /* 导航与顶栏 */
     history: '操作记录', createdAt: '录入时间', lastEdited: '最后修改', logCount: '记录条数', noLog: '暂无操作记录', viaTx: '来自记账',
     auditT: '操作日志', auditSub: '所有手动操作都会记录时间与改动内容（包括已删除的资产和记账）。行情自动刷新不记录。', loadMore: '加载更多',
@@ -144,7 +149,7 @@ window.AV_I18N = {
     statTx: '{n} 条记账', statSnap: '{n} 天快照', statSize: '约 {n} KB',
     export: '导出数据', import: '导入数据', clearAll: '清空本地数据', exported: '已导出 JSON 备份文件',
     importOk: '导入成功', importBad: '文件格式不正确', importT: '导入数据？', importM: '将用「{n}」（{a} 项资产、{x} 条记账）覆盖当前全部数据。',
-    demoT: '加载演示数据？', demoM: '当前数据将被演示数据覆盖，建议先导出备份。', demoLoaded: '演示数据已加载',
+    demoT: '加载演示数据？', demoM: '当前数据会被演示数据替换（会自动备份，可在「数据恢复」找回）。演示数据不会自动上传覆盖云端。', demoLoaded: '演示数据已加载',
     clearT: '清空全部本地数据？', clearM: '所有资产、记账、快照与设置将被删除且无法恢复，建议先导出备份。', cleared: '本地数据已清空',
     defaultBookName: '我的 AssetHub', demoBookName: "Jasper's AssetHub",
 
@@ -176,6 +181,11 @@ window.AV_I18N = {
   },
 
   en: {
+    close: 'Close', restore: 'Restore', recoverT: 'Data recovery', recoverIntro: 'Before loading demo, importing, clearing, cloud overwrite or restoring, the current data is backed up automatically (last 10 kept on this device). The cloud Gist keeps every uploaded version. Restoring backs up the current data first.', recoverLocal: 'Local backups', recoverNoLocal: 'No local backups yet', recoverLegacy: 'Old AssetView data', recoverCloud: 'Cloud history (Gist)', recoverLoadCloud: 'Load cloud history', recoverNoCloud: 'No token / Gist ID, or no history', recoverView: 'View', recoverClickView: 'click View to read', restoreT: 'Restore this version?', restoreM: 'Restore to: {s}. Current data will be backed up first and the result synced to the cloud.', restoreDone: 'Restored', demoTag: 'demo', act_restore: 'Restored data',
+    bk_demo: 'Before demo', bk_import: 'Before import', bk_clear: 'Before clear', bk_pull: 'Before cloud pull', bk_restore: 'Before restore',
+    syncNeedPass: 'Cloud data is encrypted. Click the cloud button to enter the password', syncCanceled: 'Cancelled', syncDemoBlock: 'Demo data is never auto-uploaded over your cloud data. Click the cloud button to use cloud data', demoBlockT: 'This device has demo data', demoBlockM: 'The cloud has your data ({s}). Demo data won’t be uploaded. Replace this device’s data with the cloud data?', demoPushT: 'Upload demo data?', demoPushM: 'This device has demo data. Uploading overwrites the cloud (old versions stay in Data recovery). Continue?',
+    syncSetPassMsg: 'Synced data is encrypted with a password. Set one now (it is also your lock password); enter the same password on other devices.', syncEncT: 'Encrypt synced data', syncEncM: 'Cloud data will be stored encrypted from now on. Enter your lock password (once).', cloudPassT: 'Enter password to decrypt', cloudPassM: 'Cloud data is encrypted. Enter your password; this device’s lock password will be set to the same one.', cloudPassOldM: 'This version was encrypted with the password at that time. Enter that password.', passWrongRetry: 'Wrong password, try again', passSynced: 'Password synced, cloud data decrypted', passSyncedChanged: 'Decrypted. This device’s lock password now matches the cloud', changePassMsg: 'Cloud data will be re-encrypted with the new password; other devices will ask for it on next sync.', encOn: 'Cloud data is encrypted (same as lock password)', encOff: 'Cloud data will be encrypted on next sync (enter lock password once)',
+    syncE401: 'Token invalid or expired (HTTP 401). Generate a new token', syncE404: 'Gist not found (HTTP 404): check the Gist ID and that the token has the gist scope', syncE403: 'Forbidden or rate-limited (HTTP 403). Check the gist scope or retry later', syncE422: 'GitHub rejected the data (HTTP 422). Try “New Gist”', syncE5xx: 'GitHub server error (HTTP {c}), retried 3 times. Try later, or use “New Gist”', syncENet: 'Network error or timeout. Check your connection', gistNew: 'New Gist', gistNewT: 'Create a new Gist and upload?', gistNewM: 'A new secret Gist will be created with this device’s data and replace the current Gist ID. Other devices must switch to the new ID. The old Gist is kept.', gistNewDone: 'Uploaded to a new Gist: {id} (use this ID on other devices)',
     history: 'History', createdAt: 'Created', lastEdited: 'Last edited', logCount: 'Entries', noLog: 'No history yet', viaTx: 'Via entry',
     auditT: 'Activity Log', auditSub: 'Every manual change is logged with time and details (including deleted assets and entries). Automatic quote refreshes are not logged.', loadMore: 'Load more',
     kind_asset: 'Asset', kind_tx: 'Entry', kind_system: 'System',
@@ -303,7 +313,7 @@ window.AV_I18N = {
     statTx: '{n} entries', statSnap: '{n} daily snapshots', statSize: '~{n} KB',
     export: 'Export', import: 'Import', clearAll: 'Clear local data', exported: 'JSON backup exported',
     importOk: 'Import complete', importBad: 'Invalid file format', importT: 'Import data?', importM: '“{n}” ({a} assets, {x} entries) will replace all current data.',
-    demoT: 'Load demo data?', demoM: 'Current data will be replaced. Consider exporting a backup first.', demoLoaded: 'Demo data loaded',
+    demoT: 'Load demo data?', demoM: 'Current data will be replaced (auto-backed up; restore it from “Data recovery”). Demo data is never auto-uploaded to the cloud.', demoLoaded: 'Demo data loaded',
     clearT: 'Clear all local data?', clearM: 'All assets, entries, snapshots and settings will be permanently deleted. Export a backup first.', cleared: 'Local data cleared',
     defaultBookName: 'My AssetHub', demoBookName: "Jasper's AssetHub",
 

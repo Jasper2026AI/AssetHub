@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp'];
+  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
 
   const ICON = {
@@ -212,11 +212,12 @@
   function scheduleSync() {
     if (!S().autoSync || !syncReady()) { renderSyncBtn(); return; }
     clearTimeout(SYNC.timer);
-    SYNC.timer = setTimeout(() => syncNow({ silent: true }), 3000);
+    SYNC.timer = setTimeout(() => syncNow({ silent: true }), 10000);   // 停止操作 10 秒后再上传，减少 Gist 版本数
     renderSyncBtn();
   }
   /** 把云端的数据套用到本机：只替换资产、记账、账本信息，设备自己的设置（布局、配色、密码等）保持不变 */
   function applyCloud(obj) {
+    backupNow('pull');
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs;
     DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo });
@@ -226,24 +227,167 @@
     DB.audit = merged.slice(-2000);
     S().syncedStamp = c.meta.updatedAt || 0;
   }
-  async function pushCloud() {
-    const id = await Api.gistPush(S().gistToken, S().gistId, JSON.stringify(exportable(), null, 2), `AssetHub · ${bookName()}`);
+  async function pushCloud(interactive) {
+    await ensureSyncKey(interactive);
+    const body = await encodeCloud(JSON.stringify(exportable()));        // 加密后再上传
+    const id = await Api.gistPush(S().gistToken, S().gistId, body, `AssetHub · ${bookName()}`);
     S().gistId = id; S().syncedStamp = DB.meta.updatedAt || 0; S().gistLast = Date.now();
   }
+  /* ================= 同步加密 =================
+     云端 Gist 只保存密文 {assethub:'enc1', salt, iter, iv, data}：锁定密码 → PBKDF2 → AES-GCM。
+     本机只保存派生出的密钥（syncKey），不保存密码，也不导出、不同步。
+     新设备第一次拉取时输入一次密码，解密成功后本机锁定密码自动改成同一个 —— 即“密码多端同步”。 */
+  const ENC_ITER = 200000;
+  const b64 = buf => { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
+  const unb64 = str => Uint8Array.from(atob(str), c => c.charCodeAt(0));
+  async function deriveKeyRaw(pw, saltB64, iter) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
+    return b64(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: unb64(saltB64), iterations: iter || ENC_ITER, hash: 'SHA-256' }, base, 256));
+  }
+  const aesKey = raw => crypto.subtle.importKey('raw', unb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  async function setSyncKey(pw) {
+    const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+    S().syncKey = await deriveKeyRaw(pw, salt, ENC_ITER); S().syncSalt = salt; S().syncIter = ENC_ITER;
+  }
+  async function encodeCloud(text) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(S().syncKey), new TextEncoder().encode(text));
+    return JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, iv: b64(iv), data: b64(ct) });
+  }
+  async function decryptWith(raw, env) {
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, await aesKey(raw), unb64(env.data));
+    return new TextDecoder().decode(pt);
+  }
+  const isEnc = o => !!(o && o.assethub === 'enc1' && o.data);
+  /** 上传前确保有加密密钥：没有密码先设密码，有密码就输入一次 */
+  async function ensureSyncKey(interactive) {
+    if (S().syncKey) return;
+    if (!interactive) throw new Error('NEED_PASS');
+    if (!S().passHash) { if (!(await setPasswordFlow(t('syncSetPassMsg')))) throw new Error('CANCEL'); if (S().syncKey) return; }
+    const r = await passDialog(t('syncEncT'), t('syncEncM'), ['cur']);
+    if (!r) throw new Error('CANCEL');
+    if ((await hashPass(r.cur)) !== S().passHash) throw new Error(t('passWrong'));
+    await setSyncKey(r.cur); save();
+  }
+  /** 云端文本 → 数据对象。加密数据先用本机密钥解；解不开（新设备 / 别的设备改过密码）就请你输入密码。
+      opt.old = 读取历史版本：只解密，不改本机密码 */
+  async function decodeCloud(text, opt) {
+    opt = opt || {};
+    const obj = JSON.parse(text);
+    if (!isEnc(obj)) return obj;
+    if (S().syncKey) { try { return JSON.parse(await decryptWith(S().syncKey, obj)); } catch (e) { /* 密钥不对 */ } }
+    if (!opt.interactive) throw new Error('NEED_PASS');
+    for (let i = 0; i < 3; i++) {
+      const r = await passDialog(t('cloudPassT'), i ? t('passWrongRetry') : t(opt.old ? 'cloudPassOldM' : 'cloudPassM'), ['cur']);
+      if (!r) throw new Error('CANCEL');
+      let raw, data;
+      try { raw = await deriveKeyRaw(r.cur, obj.salt, obj.iter); data = JSON.parse(await decryptWith(raw, obj)); } catch (e) { continue; }
+      if (!opt.old) {
+        const h = await hashPass(r.cur), changed = !!S().passHash && S().passHash !== h;
+        S().syncKey = raw; S().syncSalt = obj.salt; S().syncIter = obj.iter || ENC_ITER; S().passHash = h; unlockFor(); save();
+        toast(changed ? t('passSyncedChanged') : t('passSynced'), 'ok');
+      }
+      return data;
+    }
+    throw new Error(t('passWrong'));
+  }
+
+  /* ================= 本机自动备份（加载演示 / 导入 / 清空 / 云端覆盖 / 恢复 之前） ================= */
+  const BACKUP_KEY = 'assethub.backups.v1';
+  function readBackups() { try { const l = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
+  function backupNow(reason) {
+    if (!DB.assets.length && !DB.txs.length) return;
+    const data = JSON.stringify({ assets: DB.assets, txs: DB.txs, meta: DB.meta, snaps: DB.snaps, audit: DB.audit });
+    let list = readBackups().filter(b => b.data !== data);
+    list.unshift({ ts: Date.now(), reason, n: DB.assets.length, m: DB.txs.length, name: DB.meta.name || '', demo: !!DB.meta.demo, data });
+    list = list.slice(0, 10);
+    while (list.length) { try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return; } catch (e) { list.pop(); } }
+  }
+  /** 用某个版本替换当前数据（先自动备份当前数据），并上传到云端 */
+  function restoreData(obj, label) {
+    backupNow('restore');
+    const cur = JSON.parse(JSON.stringify(DB));
+    DB = migrate(Object.assign(cur, { assets: obj.assets, txs: obj.txs, snaps: obj.snaps || {}, audit: obj.audit || cur.audit, meta: Object.assign({}, cur.meta, obj.meta || {}) }));
+    DB.meta.demo = !!(obj.meta && obj.meta.demo);
+    logOp('system', null, 'restore', null, { from: label });
+    UI.hold.sel.clear(); UI.led.sel.clear();
+    commit(); renderAll(); toast(t('restoreDone'), 'ok');
+    refreshQuotes({ silent: true });
+  }
+  const dataSummary = o => `${t('nAssets', { n: o.assets.length })} · ${t('statTx', { n: o.txs.length })}${o.meta && o.meta.name ? ' · ' + esc(o.meta.name) : ''}${o.meta && o.meta.demo ? ` · <span class="down">${t('demoTag')}</span>` : ''}`;
+  /** 数据恢复：本机自动备份 / 旧版本数据 / 云端 Gist 历史版本 */
+  function openRecovery() {
+    const locals = readBackups();
+    let legacy = null;
+    LEGACY_KEYS.forEach(k => { try { const o = JSON.parse(localStorage.getItem(k) || 'null'); if (validData(o) && (o.assets.length || o.txs.length)) legacy = o; } catch (e) { /* ignore */ } });
+    const cloudOK = !!(S().gistToken && S().gistId);
+    const cache = {};
+    const row = (title, sub, attrs, btn) => `<div class="rc-row"><div class="rc-main"><b>${title}</b><small>${sub}</small></div><button class="btn btn-soft sm" ${attrs}>${btn || t('restore')}</button></div>`;
+    const body = `
+      <p class="hint" style="margin:0 0 14px">${t('recoverIntro')}</p>
+      <div class="rc-sec"><h5>${ic('db')}${t('recoverLocal')}</h5>
+        ${locals.length ? locals.map((b, i) => row(`${dateTimeStr(b.ts)} · ${t('bk_' + b.reason) || b.reason}`, `${t('nAssets', { n: b.n })} · ${t('statTx', { n: b.m })}${b.name ? ' · ' + esc(b.name) : ''}${b.demo ? ` · <span class="down">${t('demoTag')}</span>` : ''}`, `data-rc="local" data-i="${i}"`)).join('') : `<div class="rc-empty">${t('recoverNoLocal')}</div>`}
+        ${legacy ? row(t('recoverLegacy'), dataSummary(legacy), 'data-rc="legacy"') : ''}
+      </div>
+      <div class="rc-sec"><h5>${ic('cloud')}${t('recoverCloud')}</h5>
+        ${cloudOK ? `<div id="rc-cloud"><button class="btn btn-glass sm" data-rc="load-cloud">${ic('download')}${t('recoverLoadCloud')}</button></div>` : `<div class="rc-empty">${t('recoverNoCloud')}</div>`}
+      </div>`;
+    openModal({
+      title: t('recoverT'), body, wide: true,
+      footer: `<button class="btn btn-glass" data-modal-close>${t('close')}</button>`,
+      onMount(m) {
+        const doRestore = async (obj, label) => {
+          if (!validData(obj)) { toast(t('importBad'), 'err'); return; }
+          if (!(await confirmDialog({ title: t('restoreT'), msg: t('restoreM', { s: dataSummary(obj) }), ok: t('restore'), danger: false }))) return;
+          if (!(await requireUnlock())) return;
+          closeModal(); restoreData(obj, label);
+        };
+        m.addEventListener('click', async e => {
+          const b = e.target.closest('[data-rc]'); if (!b) return;
+          const k = b.dataset.rc;
+          if (k === 'local') { const it = readBackups()[+b.dataset.i]; if (it) doRestore(JSON.parse(it.data), 'local ' + dateTimeStr(it.ts)); return; }
+          if (k === 'legacy') { doRestore(legacy, 'AssetView'); return; }
+          if (k === 'load-cloud') {
+            b.disabled = true; b.classList.add('spin');
+            try {
+              const list = await Api.gistHistory(S().gistToken, S().gistId);
+              $('#rc-cloud', m).innerHTML = list.length ? `<div class="rc-list">${list.map(v => row(dateTimeStr(new Date(v.at).getTime()), `<span id="rcs-${v.sha}">+${v.add} / −${v.del} · ${t('recoverClickView')}</span>`, `data-rc="ver" data-sha="${v.sha}" data-at="${esc(v.at)}"`, t('recoverView'))).join('')}</div>` : `<div class="rc-empty">${t('recoverNoCloud')}</div>`;
+            } catch (err) { toast(t('syncFail') + ' · ' + syncErrText(err), 'err'); b.disabled = false; b.classList.remove('spin'); }
+            return;
+          }
+          if (k === 'ver') {
+            const sha = b.dataset.sha;
+            if (cache[sha]) { doRestore(cache[sha], 'cloud ' + dateTimeStr(new Date(b.dataset.at).getTime())); return; }
+            b.disabled = true; b.classList.add('spin');
+            try {
+              const obj = await decodeCloud(await Api.gistVersion(S().gistToken, S().gistId, sha), { interactive: true, old: true });
+              if (!validData(obj)) throw new Error(t('importBad'));
+              cache[sha] = obj;
+              const sEl = $('#rcs-' + sha, m); if (sEl) sEl.innerHTML = dataSummary(obj);
+              b.textContent = t('restore');
+            } catch (err) { if (err.message !== 'CANCEL') toast(t('syncFail') + ' · ' + syncErrText(err), 'err'); }
+            b.disabled = false; b.classList.remove('spin');
+          }
+        });
+      }
+    });
+  }
+
   /** 同步一次：自动判断该上传还是下载；两边都改过时让你选 */
   async function syncNow(opt) {
     opt = opt || {};
     if (SYNC.busy) return;
     if (!S().gistToken) { if (!opt.silent) { toast(t('syncNeedSetup'), 'err'); UI.page = 'settings'; renderNav(); renderPage(); } return; }
     SYNC.busy = true; SYNC.state = 'busy'; renderSyncBtn();
+    const inter = !opt.silent || !!opt.interactive;
     try {
       const localDirty = (DB.meta.updatedAt || 0) > (S().syncedStamp || 0);
       if (!S().gistId) {                                       // 还没有 Gist：直接创建
         if (!DB.meta.updatedAt) markDirty();
-        await pushCloud(); save();
+        await pushCloud(inter); save();
         if (!opt.silent) toast(t('syncPushed'), 'ok');
       } else {
-        const cloud = JSON.parse(await Api.gistPull(S().gistToken, S().gistId));
+        const cloud = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: inter });
         if (!validData(cloud)) throw new Error(t('importBad'));
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
         const cloudNew = (cStamp > (S().syncedStamp || 0) && cStamp !== DB.meta.updatedAt) || (!cStamp && !S().syncedStamp && !localDirty && (cloud.assets.length || cloud.txs.length));
@@ -253,17 +397,36 @@
           action = keepCloud ? 'pull' : 'push';
         } else if (cloudNew) action = 'pull';
         else if (localDirty) action = 'push';
+        // 本机是演示数据、云端是真实数据：绝不自动上传覆盖，询问是否用云端替换本机
+        if (action === 'push' && DB.meta.demo && !(cloud.meta && cloud.meta.demo) && (cloud.assets.length || cloud.txs.length)) {
+          if (!inter) throw new Error('DEMO_BLOCK');
+          action = (await confirmDialog({ title: t('demoBlockT'), msg: t('demoBlockM', { s: dataSummary(cloud) }), ok: t('syncUseCloud'), cancel: t('cancel'), danger: false })) ? 'pull' : 'none';
+        }
         if (action === 'pull') { applyCloud(cloud); logOp('system', null, 'cloudPull'); S().gistLast = Date.now(); save(); renderAll(); toast(t('syncPulled'), 'ok'); }
-        else if (action === 'push') { await pushCloud(); save(); if (!opt.silent) toast(t('syncPushed'), 'ok'); }
+        else if (action === 'push') { await pushCloud(inter); save(); if (!opt.silent) toast(t('syncPushed'), 'ok'); }
         else { S().gistLast = Date.now(); save(); if (!opt.silent) toast(t('syncUpToDate'), 'ok'); }
       }
       SYNC.state = 'ok'; SYNC.lastErr = '';
     } catch (e) {
-      SYNC.state = 'err'; SYNC.lastErr = e.message || 'error';
-      if (!opt.silent) toast(t('syncFail') + ' · ' + SYNC.lastErr, 'err');
+      SYNC.state = 'err'; SYNC.lastErr = syncErrText(e);
+      if (!opt.silent && e.message !== 'CANCEL') toast(t('syncFail') + ' · ' + SYNC.lastErr, 'err');
     }
     SYNC.busy = false; SYNC.lastCheck = Date.now(); renderSyncBtn();
     if (UI.page === 'settings') renderPage();
+  }
+  /** 把 GitHub 错误码翻译成看得懂的原因 */
+  function syncErrText(e) {
+    const m = String((e && e.message) || 'error'), code = (m.match(/HTTP (\d{3})/) || [])[1];
+    if (m === 'NEED_PASS') return t('syncNeedPass');
+    if (m === 'CANCEL') return t('syncCanceled');
+    if (m === 'DEMO_BLOCK') return t('syncDemoBlock');
+    if (code === '401') return t('syncE401');
+    if (code === '404') return t('syncE404');
+    if (code === '403') return t('syncE403');
+    if (code === '422') return t('syncE422');
+    if (code && code[0] === '5') return t('syncE5xx', { c: code });
+    if (/Timeout|Failed to fetch|NetworkError|Load failed/i.test(m)) return t('syncENet');
+    return m;
   }
   function syncBtnHTML() {
     let st = 'off', tip = t('syncOff');
@@ -1280,6 +1443,7 @@
             <button class="btn btn-accent" data-action="export">${ic('download')}${t('export')}</button>
             <button class="btn btn-glass" data-action="import">${ic('upload')}${t('import')}</button>
             <button class="btn btn-soft" data-action="demo">${ic('sparkle')}${t('loadDemo')}</button>
+            <button class="btn btn-glass" data-action="recover">${ic('clock')}${t('recoverT')}</button>
             <button class="btn btn-danger" data-action="clear">${ic('trash')}${t('clearAll')}</button>
           </div>
         </div>
@@ -1309,7 +1473,10 @@
             <button class="btn btn-accent" data-action="sync-now">${ic('cloud')}${t('syncNowBtn')}</button>
             <button class="btn btn-glass" data-action="gist-push">${ic('upload')}${t('gistPush')}</button>
             <button class="btn btn-glass" data-action="gist-pull">${ic('download')}${t('gistPull')}</button>
+            <button class="btn btn-glass" data-action="gist-new">${ic('plus')}${t('gistNew')}</button>
           </div>
+          <div class="hint" style="margin-top:10px">${ic('lock')} ${S().syncKey ? t('encOn') : t('encOff')}</div>
+          ${SYNC.state === 'err' && SYNC.lastErr ? `<div class="hint down" style="margin-top:10px">${t('syncFail')} · ${esc(SYNC.lastErr)}</div>` : ''}
           <div class="hint" style="margin-top:12px">${t('lastSync')}: ${s.gistLast ? new Date(s.gistLast).toLocaleString(locale(), { hour12: false }) : t('never')}</div>
         </div>
       </div>
@@ -1438,16 +1605,18 @@
       return 'fnv:' + (h >>> 0).toString(16);
     }
   }
-  async function setPasswordFlow() {
+  async function setPasswordFlow(msg) {
     const hasOld = !!S().passHash;
-    const r = await passDialog(hasOld ? t('changePass') : t('setPass'), hasOld ? '' : t('setPassMsg'), hasOld ? ['old', 'new', 'confirm'] : ['new', 'confirm']);
+    const r = await passDialog(hasOld ? t('changePass') : t('setPass'), hasOld ? t('changePassMsg') : (msg || t('setPassMsg')), hasOld ? ['old', 'new', 'confirm'] : ['new', 'confirm']);
     if (!r) return false;
     if (hasOld && (await hashPass(r.old)) !== S().passHash) { toast(t('passWrong'), 'err'); return false; }
     if (!r.new || r.new.length < 4) { toast(t('passShort'), 'err'); return false; }
     if (r.new !== r.confirm) { toast(t('passMismatch'), 'err'); return false; }
     S().passHash = await hashPass(r.new);
+    try { await setSyncKey(r.new); } catch (e) { /* 浏览器不支持加密时仅设置锁定密码 */ }
     unlockFor();
     save(); toast(t('passSaved'), 'ok');
+    if (syncReady()) { markDirty(); save(); scheduleSync(); }   // 用新密码重新加密云端数据
     return true;
   }
   function unlockFor() {
@@ -2075,7 +2244,7 @@
       if (!validData(obj)) { toast(t('importBad'), 'err'); return; }
       const ok = await confirmDialog({ title: t('importT'), msg: t('importM', { n: esc(file.name), a: obj.assets.length, x: obj.txs.length }), ok: t('import'), danger: false });
       if (!ok) return;
-      restoreFrom(obj); logOp('system', null, 'import', null, { file: file.name }); markDirty(); save(); scheduleSync(); setupAutoRefresh(); renderAll(); toast(t('importOk'), 'ok');
+      backupNow('import'); restoreFrom(obj); logOp('system', null, 'import', null, { file: file.name }); markDirty(); save(); scheduleSync(); setupAutoRefresh(); renderAll(); toast(t('importOk'), 'ok');
     };
     rd.readAsText(file);
   }
@@ -2195,7 +2364,7 @@
   /** 首次打开（没有任何数据）或仍在使用旧版演示数据时，自动填充演示数据 */
   function autoDemo() {
     if (DB.meta.noDemo) return false;
-    const isOldDemo = /Jasper's Asset(View|Hub)/.test(DB.meta.name || '') && Object.keys(DB.snaps).length < 30;
+    const isOldDemo = DB.meta.demo === true && /Jasper's Asset(View|Hub)/.test(DB.meta.name || '') && Object.keys(DB.snaps).length < 30;   // 只替换旧版演示数据，绝不动真实数据
     if ((DB.assets.length || DB.txs.length) && !isOldDemo) return false;
     const d = buildDemo();
     DB.assets = d.assets; DB.txs = d.txs; DB.snaps = d.snaps;
@@ -2206,6 +2375,7 @@
   async function loadDemo() {
     if (DB.assets.length || DB.txs.length) {
       if (!(await confirmDialog({ title: t('demoT'), msg: t('demoM'), ok: t('loadDemo') }))) return;
+      backupNow('demo');
     }
     const d = buildDemo();
     DB.assets = d.assets; DB.txs = d.txs; DB.snaps = d.snaps;
@@ -2330,6 +2500,7 @@
       if (Date.now() < UI.unlockUntil) { UI.unlockUntil = 0; refreshLockBtn(); toast(t('lockedNow')); return; }
       if (await requireUnlock(UI.page === 'holdings' ? t('verifyAssetMsg') : null)) { refreshLockBtn(); toast(t('unlockedToast'), 'ok'); }
     },
+    recover() { openRecovery(); },
     'set-pass'() { setPasswordFlow().then(ok => { if (ok) renderPage(); }); },
     'lock-now'() { UI.unlockUntil = 0; renderPage(); toast(t('lockedNow')); },
     export() { doExport(); },
@@ -2338,6 +2509,7 @@
     async clear() {
       if (!(await confirmDialog({ title: t('clearT'), msg: t('clearM'), ok: t('clearAll') }))) return;
       const keep = { lang: S().lang, layout: S().layout };
+      backupNow('clear');
       localStorage.removeItem(STORE_KEY); LEGACY_KEYS.forEach(k => localStorage.removeItem(k));
       DB = defaultDB(); Object.assign(DB.settings, keep);
       DB.meta.noDemo = true;   // 清空后不再自动填充演示数据
@@ -2406,20 +2578,33 @@
       if (!S().gistToken) { toast(t('gistNeedToken'), 'err'); return; }
       el.disabled = true; el.classList.add('spin');
       try {
+        if (DB.meta.demo && !(await confirmDialog({ title: t('demoPushT'), msg: t('demoPushM'), ok: t('gistPush') }))) { el.disabled = false; el.classList.remove('spin'); return; }
         if (!DB.meta.updatedAt) markDirty();
-        await pushCloud(); save(); renderPage(); renderSyncBtn(); toast(t('gistPushed'), 'ok');
-      } catch (e) { toast(t('errFetch') + ' · ' + e.message, 'err'); }
+        await pushCloud(true); save(); renderPage(); renderSyncBtn(); toast(t('gistPushed'), 'ok');
+      } catch (e) { if (e.message !== 'CANCEL') toast(t('syncFail') + ' · ' + syncErrText(e), 'err'); }
       el.disabled = false; el.classList.remove('spin');
+    },
+    /** 云端 Gist 出问题（持续 5xx 等）时：新建一个 Gist 重新上传本机数据 */
+    async 'gist-new'(el) {
+      if (!S().gistToken) { toast(t('gistNeedToken'), 'err'); return; }
+      if (!(await confirmDialog({ title: t('gistNewT'), msg: t('gistNewM'), ok: t('gistNew'), danger: false }))) return;
+      el.disabled = true; el.classList.add('spin');
+      const oldId = S().gistId;
+      try {
+        S().gistId = ''; if (!DB.meta.updatedAt) markDirty();
+        await pushCloud(true); SYNC.state = 'ok'; SYNC.lastErr = ''; save(); renderPage(); renderSyncBtn();
+        toast(t('gistNewDone', { id: S().gistId }), 'ok');
+      } catch (e) { S().gistId = oldId; toast(t('syncFail') + ' · ' + syncErrText(e), 'err'); el.disabled = false; el.classList.remove('spin'); }
     },
     async 'gist-pull'(el) {
       if (!S().gistId) { toast(t('gistNeedId'), 'err'); return; }
       if (!(await confirmDialog({ title: t('gistPullT'), msg: t('gistPullM'), ok: t('gistPull'), danger: false }))) return;
       el.disabled = true; el.classList.add('spin');
       try {
-        const obj = JSON.parse(await Api.gistPull(S().gistToken, S().gistId));
+        const obj = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: true });
         if (!validData(obj)) throw new Error(t('importBad'));
         applyCloud(obj); S().gistLast = Date.now(); save(); renderAll(); toast(t('gistPulled'), 'ok');
-      } catch (e) { toast(t('errFetch') + ' · ' + e.message, 'err'); el.disabled = false; el.classList.remove('spin'); }
+      } catch (e) { toast(t('syncFail') + ' · ' + syncErrText(e), 'err'); el.disabled = false; el.classList.remove('spin'); }
     }
   };
 
@@ -2457,11 +2642,12 @@
       if (el.dataset.set) {
         const k = el.dataset.set;
         const old = S()[k];
-        S()[k] = el.type === 'checkbox' ? el.checked : (k === 'autoRefresh' || k === 'lockMinutes') ? +el.value : el.value.trim();
+        S()[k] = el.type === 'checkbox' ? el.checked : (k === 'autoRefresh' || k === 'lockMinutes') ? +el.value : k === 'gistId' ? Api.gistIdOf(el.value) : k === 'gistToken' ? Api.cleanToken(el.value) : el.value.trim();
+        if (k === 'gistId' || k === 'gistToken') el.value = S()[k];
         if (old === S()[k]) return;                                // 值没变（例如失焦时重复触发）就什么都不做
         if (k === 'gistId') S().syncedStamp = 0;                 // 换了 Gist 视为全新同步
         save();
-        if (k === 'gistToken' || k === 'gistId' || k === 'autoSync') { renderSyncBtn(); if (S().autoSync && syncReady()) syncNow({ silent: true }); }
+        if (k === 'gistToken' || k === 'gistId' || k === 'autoSync') { renderSyncBtn(); if (S().autoSync && syncReady()) syncNow({ silent: true, interactive: true }); }
         if (k === 'autoRefresh') setupAutoRefresh();
         if (k === 'stockSrc' || k === 'fxSrc') renderPage();
         toast(t('saved'), 'ok');

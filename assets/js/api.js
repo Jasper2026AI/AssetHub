@@ -214,25 +214,67 @@
     if (token) h.Authorization = 'Bearer ' + token;
     return h;
   }
+  /** 规范化 Gist ID：允许粘贴完整链接（https://gist.github.com/用户名/ID）或 “用户名/ID” */
+  function gistIdOf(v) {
+    const s = String(v || '').trim();
+    const m = s.match(/([0-9a-f]{20,40})(?:[#?\/].*)?$/i);
+    return m ? m[1] : s.replace(/^.*\//, '');
+  }
+  const cleanToken = v => String(v || '').replace(/\s+/g, '').replace(/^(token|bearer)/i, '');
+  /** GitHub 偶发 5xx / 超时 / 网络抖动：自动重试（共 3 次，间隔 1.5s、4s） */
+  async function ghRetry(fn) {
+    const waits = [1500, 4000];
+    for (let i = 0; ; i++) {
+      try { return await fn(); }
+      catch (e) {
+        const m = String(e.message || ''), retry = /HTTP 5\d\d|Timeout|Failed to fetch|NetworkError|Load failed/i.test(m);
+        if (!retry || i >= waits.length) throw e;
+        await new Promise(r => setTimeout(r, waits[i]));
+      }
+    }
+  }
   async function gistPush(token, id, content, desc) {
+    token = cleanToken(token); id = gistIdOf(id);
     const body = { description: desc || 'AssetHub data', files: { [GIST_FILE]: { content } } };
     const headers = Object.assign(gistHeaders(token), { 'Content-Type': 'application/json' });
     let j;
-    if (id) j = await fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}`, { method: 'PATCH', headers, body: JSON.stringify(body), timeout: 20000 });
-    else { body.public = false; j = await fetchJSON('https://api.github.com/gists', { method: 'POST', headers, body: JSON.stringify(body), timeout: 20000 }); }
+    if (id) j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}`, { method: 'PATCH', headers, body: JSON.stringify(body), timeout: 30000 }));
+    else { body.public = false; j = await ghRetry(() => fetchJSON('https://api.github.com/gists', { method: 'POST', headers, body: JSON.stringify(body), timeout: 30000 })); }
     return j.id;
   }
   async function gistPull(token, id) {
-    const j = await fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}`, { headers: gistHeaders(token), timeout: 20000 });
+    token = cleanToken(token); id = gistIdOf(id);
+    const j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}`, { headers: gistHeaders(token), timeout: 30000 }));
     const f = j.files && (j.files[GIST_FILE] || j.files['assetview.json'] || Object.values(j.files)[0]);
     if (!f) throw new Error('Empty gist');
-    if (f.truncated && f.raw_url) { const r = await fetch(f.raw_url); return await r.text(); }
+    if (f.truncated && f.raw_url) { const r = await fetch(f.raw_url, { cache: 'no-store' }); return await r.text(); }
+    return f.content;
+  }
+
+  /** Gist 历史版本（每次上传都会产生一个版本），新的在前 */
+  async function gistHistory(token, id) {
+    token = cleanToken(token); id = gistIdOf(id);
+    const out = [];
+    for (let page = 1; page <= 3; page++) {
+      const list = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}/commits?per_page=100&page=${page}`, { headers: gistHeaders(token), timeout: 30000 }));
+      list.forEach(c => out.push({ sha: c.version, at: c.committed_at, add: (c.change_status || {}).additions || 0, del: (c.change_status || {}).deletions || 0 }));
+      if (list.length < 100) break;
+    }
+    return out;
+  }
+  /** 读取某个历史版本的数据文本 */
+  async function gistVersion(token, id, sha) {
+    token = cleanToken(token); id = gistIdOf(id);
+    const j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}/${encodeURIComponent(sha)}`, { headers: gistHeaders(token), timeout: 30000 }));
+    const f = j.files && (j.files[GIST_FILE] || j.files['assetview.json'] || Object.values(j.files)[0]);
+    if (!f) throw new Error('Empty gist');
+    if (f.truncated && f.raw_url) { const r = await fetch(f.raw_url, { cache: 'no-store' }); return await r.text(); }
     return f.content;
   }
 
   window.AVApi = {
     FX_SOURCES, CRYPTO_SOURCES, STOCK_SOURCES,
     fetchRates, cryptoQuote, cryptoPriceUSD, stockQuote, stockCcy, quoteAsset, quoteKind, canQuote, isGold, OZ_G,
-    gistPush, gistPull
+    gistPush, gistPull, gistIdOf, cleanToken, gistHistory, gistVersion
   };
 })();
