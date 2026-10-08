@@ -751,11 +751,14 @@ body.mobile .kpi.hero .spark,body.mobile .kpi.dual .spark{height:34px;bottom:5px
 
 /* v2.4 同步按钮 / 更新市值 */
 .sync-btn{position:relative}
-.sync-btn .sdot{position:absolute;right:5px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--text-3);box-shadow:0 0 0 2px #121214}
-.sync-btn.st-ok .sdot{background:var(--up)}
-.sync-btn.st-dirty .sdot{background:var(--accent);animation:pulseO 1.6s infinite}
-.sync-btn.st-err .sdot{background:var(--down)}
-.sync-btn.st-busy .sdot{background:#0A84FF}
+/* 同步状态直接给云朵上色：绿 = 已同步，橙 = 待上传，红 = 失败，蓝 = 同步中，灰 = 未设置 */
+.sync-btn svg.i{transition:color .25s,filter .25s}
+.sync-btn.st-ok svg.i{color:#30D158}
+.sync-btn.st-dirty svg.i{color:var(--accent);animation:cloudPulse 1.6s ease-in-out infinite}
+.sync-btn.st-err svg.i{color:#FF453A}
+.sync-btn.st-busy svg.i{color:#0A84FF}
+.sync-btn.st-off svg.i{color:var(--text-3)}
+@keyframes cloudPulse{0%,100%{opacity:1}50%{opacity:.45}}
 .sync-btn.st-off{opacity:.7}
 @keyframes pulseO{0%{box-shadow:0 0 0 2px #121214,0 0 0 2px rgba(255,144,0,.6)}100%{box-shadow:0 0 0 2px #121214,0 0 0 8px rgba(255,144,0,0)}}
 .op.upd{color:var(--accent)}
@@ -875,3 +878,44 @@ body.mobile .upd-bar{bottom:calc(84px + env(safe-area-inset-bottom))}
 .nm-pill{--tc:#8E8E93;display:inline-block;padding:3px 10px;border-radius:999px;color:#fff;font-weight:700;background:color-mix(in srgb,var(--tc) 30%,transparent);border:1px solid color-mix(in srgb,var(--tc) 45%,transparent);max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .hold-tbl .nm-pill{font-size:12px;font-weight:600;padding:3px 10px}
 .hold-tbl .nmcell .code{font-size:12px}
+
+/* ===== 总资产独立隐藏 ===== */
+.eye-mini{display:inline-grid;place-items:center;width:26px;height:26px;margin-left:4px;border-radius:9px;color:var(--text-2);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);cursor:pointer;flex:none;position:relative;z-index:2;transition:all .18s}
+.eye-mini svg.i{width:15px;height:15px}
+.eye-mini:hover{color:var(--accent);background:var(--accent-soft)}
+
+/* ===== 基金 / 现金 翻转卡 ===== */
+.flip-card{perspective:900px}
+.flip-btn{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:3;display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:999px;font-size:11.5px;font-weight:700;color:var(--text-2);background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);cursor:pointer;transition:all .2s;white-space:nowrap}
+.flip-btn svg.i{width:13px;height:13px}
+.flip-btn:hover{color:var(--accent);border-color:rgba(255,144,0,.5);background:rgba(255,144,0,.12)}
+.flip-card.flip-out{animation:flipOut .18s ease-in forwards}
+.flip-card.flip-in{animation:flipIn .26s cubic-bezier(.2,.9,.3,1.1)}
+@keyframes flipOut{to{transform:rotateY(90deg);opacity:.4}}
+@keyframes flipIn{from{transform:rotateY(-90deg);opacity:.4}to{transform:none;opacity:1}}
+.cash-face{--tone:191,90,242}
+.cash-io{display:flex;flex-direction:column;gap:2px;margin:8px 0 4px;font-weight:700;font-size:clamp(14px,1.2vw,17px)}
+.cash-io .up-c{color:var(--up)}
+.cash-io .down-c{color:var(--down)}
+
+/* ===== 资产总占比 → 类别占比（下钻） ===== */
+.donut.drillable .donut-seg{cursor:pointer}
+.donut-center.clickable{pointer-events:auto;cursor:pointer;border-radius:50%;inset:26%;padding:0;z-index:2;overflow:visible}
+.donut-center.clickable:hover .t{color:var(--accent)}
+.donut-center .dim2{font-size:10.5px;color:var(--text-3);margin-top:6px;font-weight:500;white-space:normal;line-height:1.3}
+.legend-row.clickable{cursor:pointer;position:relative;padding-right:22px}
+.legend-row.clickable:hover{background:rgba(255,255,255,.05)}
+.legend-row .lg-go{position:absolute;right:4px;top:50%;transform:translateY(-50%);color:var(--text-3);display:grid}
+.legend-row .lg-go svg.i{width:14px;height:14px}
+.legend-row.clickable:hover .lg-go{color:var(--accent)}
+.legend-row .lg-name .code{margin-left:6px}
+.back-pill{display:inline-flex;align-items:center;gap:2px;height:30px;padding:0 12px 0 6px;border-radius:999px;font-size:12.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1px solid rgba(255,144,0,.3);cursor:pointer;transition:all .18s}
+.back-pill svg.i{width:16px;height:16px}
+.back-pill:hover{background:rgba(255,144,0,.22)}
+.alloc-crumb{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--text-3);margin:-4px 0 10px}
+.alloc-crumb button{color:var(--text-2);font-weight:600;cursor:pointer}
+.alloc-crumb button:hover{color:var(--accent)}
+.alloc-crumb svg.i{width:13px;height:13px}
+.alloc-crumb b{color:color-mix(in srgb,var(--tc) 85%,#fff);font-weight:700}
+.donut-wrap.flip-in{animation:flipIn .32s cubic-bezier(.2,.9,.3,1.1);transform-origin:50% 50%}
+.seg button:disabled{opacity:.35;cursor:not-allowed}

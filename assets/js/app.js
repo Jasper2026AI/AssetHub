@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '4.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -105,7 +105,7 @@
       cryptoSrc: 'binance', goldSrc: 'goldapi', stockSrc: 'finnhub', finnhubKey: '', twelveKey: '', avKey: '',
       fxSrc: 'erapi', autoRefresh: 5,
       trendMode: 'asset', chartRange: 'month', yStep: 'auto',
-      assetRange: 'month', kSpan: '3M', kStyle: 'candle', rankCls: 'all', moveCls: 'all', rankSort: 'desc', moveSort: 'desc', rankMode: 'day', leftMode: 'alloc',
+      assetRange: 'day', kSpan: '1M', kStyle: 'line', rankCls: 'all', moveCls: 'all', rankSort: 'desc', moveSort: 'desc', rankMode: 'day', leftMode: 'alloc',
       gistToken: '', gistId: '', gistLast: 0,
       passHash: '', lockMinutes: 5, hideAmt: false,
       autoSync: true, syncedStamp: 0
@@ -148,6 +148,7 @@
     d.audit = Array.isArray(d.audit) ? d.audit : [];
     if (!['day', 'total'].includes(d.settings.rankMode)) d.settings.rankMode = 'day';
     if (!d.settings.v21) { d.settings.trendMode = 'asset'; d.settings.v21 = true; }   // v2.1：资产趋势改为默认
+    if (!d.settings.v50) { Object.assign(d.settings, { assetRange: 'day', kSpan: '1M', kStyle: 'line', v50: true }); }   // v5.0：资产趋势默认 日 · 1M · 实线
     return d;
   }
   function load() {
@@ -543,7 +544,7 @@
       st = SYNC.busy ? 'busy' : SYNC.state === 'err' ? 'err' : dirty ? 'dirty' : 'ok';
       tip = SYNC.busy ? t('syncing') : st === 'err' ? t('syncFail') + ' · ' + syncErrNow() : st === 'dirty' ? t('syncDirty') : `${t('syncOk')} · ${dateTimeStr(S().gistLast)}`;
     }
-    return `<button class="icon-btn sync-btn st-${st} ${st === 'busy' ? 'spin' : ''}" data-action="sync-now" title="${esc(tip)}">${ic('cloud')}<i class="sdot"></i></button>`;
+    return `<button class="icon-btn sync-btn st-${st} ${st === 'busy' ? 'spin' : ''}" data-action="sync-now" title="${esc(tip)}">${ic('cloud')}</button>`;
   }
   /** 原地更新按钮状态（不替换元素，避免点击过程中按钮被重建导致点击失效） */
   function renderSyncBtn() {
@@ -945,18 +946,22 @@
       spark: sparkSVG(netSeries(kind), col(r.pnl))
     });
     $('#kpis').innerHTML =
-      kpiCard({ cls: 'hero', icon: 'wallet', label: t('kpiNet'), val: moneyHTML(net), sub: `${t('quoteAt')}: ${timeStr(DB.lastQuote)} · ${t('nAssets', { n: DB.assets.length })}`, spark: sparkSVG(netSeries('net'), accent) }) +
+      kpiCard({ cls: 'hero', icon: 'wallet', label: `${t('kpiNet')}<button class="eye-mini" data-action="toggle-total" title="${t('hideTotal')}">${ic(S().hideTotal ? 'eyeoff' : 'eye')}</button>`,
+        val: `<span class="net-val">${S().hideTotal ? MASK : moneyHTML(net)}</span>`, sub: `${t('quoteAt')}: ${timeStr(DB.lastQuote)} · ${t('nAssets', { n: DB.assets.length })}`, spark: sparkSVG(netSeries('net'), accent) }) +
       pnlCard(t('kpiDay'), 'trend', periodPnl('day'), t('vsDay'), 'day') +
       pnlCard(t('kpiMonth'), 'cal', periodPnl('month'), t('vsMonth'), 'month') +
       pnlCard(t('kpiYear'), 'sparkle', periodPnl('year'), t('vsYear'), 'year');
   }
   /** 第二行：仅资产总览页 —— 每个类别一张卡，左“总盈亏”右“日盈亏” */
   function classKpisHTML() {
+    return `<section class="kpis kpis-dual">${PNL_CLASSES.map(c => c === 'fund' ? fundFlipHTML() : classCardHTML(c)).join('')}</section>`;
+  }
+  /** 某一类别的“总盈亏 / 日盈亏”双栏卡片 */
+  function classCardHTML(c, extra) {
     const icon = { stock: 'trend', crypto: 'bolt', gold: 'sparkle', fund: 'pie' }, C = colors();
     const col = v => (v > 1e-9 ? C.up : v < -1e-9 ? C.down : '#8E8E93');
-    return `<section class="kpis kpis-dual">${PNL_CLASSES.map(c => {
-      const tot = classTotal(c), day = periodPnl('day', DB.assets.filter(a => primary(a) === c)), name = t('cls_' + c);
-      return `<div class="kpi glass dual ${tone(tot.pnl)}">
+    const tot = classTotal(c), day = periodPnl('day', DB.assets.filter(a => primary(a) === c)), name = t('cls_' + c);
+    return `<div class="kpi glass dual ${tone(tot.pnl)} ${extra ? extra.cls : ''}" ${extra ? extra.attr : ''}>
         <div class="dual-grid">
           <div><div class="lbl"><span class="ico">${ic(icon[c])}</span>${t('kpiClsTotal', { c: name })}</div>
             <div class="val num ${upDown(tot.pnl)}">${moneyHTML(tot.pnl, { sign: true })}</div>
@@ -964,10 +969,33 @@
           <div class="dual-r"><div class="lbl">${t('kpiClsDay', { c: name })}</div>
             <div class="val num ${upDown(day.pnl)}">${moneyHTML(day.pnl, { sign: true })}</div>
             <div class="sub">${t('vsDay')} <b class="num ${upDown(day.pnl)}">${pct(day.pct)}</b></div></div>
-        </div>${sparkSVG(classSeries(c), col(tot.pnl))}</div>`;
-    }).join('')}</section>`;
+        </div>${sparkSVG(classSeries(c), col(tot.pnl))}${extra ? extra.btn : ''}</div>`;
   }
-
+  /** 现金：总余额（主类别为现金的资产市值合计）+ 今日记账收入 / 支出 */
+  function cashStats() {
+    const list = DB.assets.filter(a => primary(a) === 'cash');
+    const total = list.reduce((s2, a) => s2 + aValD(a), 0);
+    const st = statsOf(x => x.date === todayKey());
+    const series = snapKeys().slice(-30).filter(k => DB.snaps[k].b).map(k => list.reduce((s2, a) => s2 + conv(DB.snaps[k].b[a.id] != null ? DB.snaps[k].b[a.id] : 0, aCcy(a), 'USD'), 0));
+    return { total, n: list.length, inc: st.inc, exp: st.exp, series };
+  }
+  /** 第四张卡：默认显示现金，底部中间按钮翻转到基金 */
+  function fundFlipHTML(anim) {
+    const face = UI.fundFace || 'cash';
+    const btn = `<button class="flip-btn" data-action="flip-fund" title="${t('flipTip')}">${ic('swap')}${face === 'cash' ? t('cls_fund') : t('cls_cash')}</button>`;
+    const extra = { cls: 'flip-card ' + (anim || ''), attr: 'id="fund-flip"', btn };
+    if (face === 'fund') return classCardHTML('fund', extra);
+    const cs = cashStats();
+    return `<div class="kpi glass dual cash-face ${extra.cls}" ${extra.attr}>
+        <div class="dual-grid">
+          <div><div class="lbl"><span class="ico">${ic('wallet')}</span>${t('cashTotal')}</div>
+            <div class="val num">${moneyHTML(cs.total)}</div>
+            <div class="sub">${t('cls_cash')} · ${t('nItems', { n: cs.n })}</div></div>
+          <div class="dual-r"><div class="lbl">${t('cashDayInc')}</div>
+            <div class="val num ${cs.inc > 0 ? 'up' : ''}">${moneyHTML(cs.inc, { sign: cs.inc > 0 })}</div>
+            <div class="sub">${t('cashDayExp')} <b class="num ${cs.exp > 0 ? 'down' : ''}">${money(-cs.exp, { sign: cs.exp > 0 })}</b></div></div>
+        </div>${sparkSVG(cs.series, '#BF5AF2')}${btn}</div>`;
+  }
   function renderFoot() {
     $('#foot').innerHTML = `<b>${esc(bookName())}</b> · ${t('footLocal')} · AssetHub v${APP_VER}`;
   }
@@ -1032,51 +1060,84 @@
     drawTrend();
   }
   /** 左侧卡片：资产占比（圆环）/ 资产排行（按市值），点击标题切换 */
+  /** 颜色变浅 / 变深（用于同一类别下各资产的配色） */
+  function shade(hex, f) {
+    const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    const m = v => Math.round(f >= 0 ? v + (255 - v) * f : v * (1 + f));
+    return '#' + [m(r), m(g), m(b)].map(v => v.toString(16).padStart(2, '0')).join('');
+  }
   function renderLeft() {
     const body = $('#left-body'); if (!body) return;
-    if (S().leftMode === 'rank') {
+    // 资产排行只在资产总占比下可用
+    $$('[data-action="left-mode"][data-v="rank"]').forEach(b => { b.disabled = !!UI.allocCls; b.title = UI.allocCls ? t('rankOnlyTotal') : ''; });
+    if (S().leftMode === 'rank' && !UI.allocCls) {
       $('#left-tools').innerHTML = `${sortBtnHTML('rankSort')}<button class="pill-select" data-action="rank-menu" data-key="rankCls" id="pill-rankCls">${rankPillHTML('rankCls')}</button>
         <button class="link" data-action="nav" data-page="holdings">${t('viewAll')}${ic('chev-r')}</button>`;
       renderRank();
       return;
     }
-    const so = S().allocSort === 'asc' ? 'asc' : 'desc';
-    $('#left-tools').innerHTML = `<button class="icon-btn sm sort-btn" data-action="alloc-sort" title="${t('allocSortTip')} · ${t('allocSort_' + so)}">${ic(so === 'asc' ? 'sortasc' : 'sortdesc')}</button>`;
-    // 占比按“主类别”统计；负债不进圆环，单独列出
-    const by = {}; CLASSES.forEach(c => { by[c] = 0; });
-    DB.assets.forEach(a => { by[primary(a)] += aValD(a); });
-    // 排序：默认按类别顺序；高→低 / 低→高 按占比，负债始终放最后
-    const order = CLASSES.filter(c => c !== 'liability');
-    if (so === 'desc') order.sort((x, y) => by[y] - by[x]); else if (so === 'asc') order.sort((x, y) => by[x] - by[y]);
-    order.push('liability');
-    const segs = order.filter(c => c !== 'liability').map(c => ({ key: c, label: t('cls_' + c), value: Math.max(0, by[c]), color: CLASS_COLOR[c] }));
-    const pos = segs.reduce((s, x) => s + x.value, 0);
-    const legend = order.map(c => {
-      const v = by[c], isL = c === 'liability', p = isL ? 0 : (pos ? (Math.max(0, v) / pos) * 100 : 0);
-      return `<div class="legend-row lg-line" data-k="${c}"><i class="dot" style="background:${CLASS_COLOR[c]}"></i>
-        <div class="lg-name">${t('cls_' + c)}</div>
-        <div class="lg-val num ${isL && v < 0 ? 'down' : ''}">${money(v)}</div>
-        <div class="lg-pct num">${isL ? '—' : p.toFixed(1) + '%'}</div>
-        <div class="lg-bar"><i style="width:${isL ? 0 : p}%;background:${CLASS_COLOR[c]}"></i></div></div>`;
-    }).join('');
-    body.innerHTML = DB.assets.length ? `<div class="donut-wrap"><div class="donut" id="donut"></div><div class="legend">${legend}</div></div>` : emptyState('assets');
-    if (DB.assets.length) {
-      const net = netD();
-      const d = Charts.donut($('#donut'), segs, {
-        id: 'alloc',
-        center: k => {
-          if (!k) return `<div class="t">${t('kpiNet')}</div><div class="v num">${money(net)}</div><div class="p">${t('nAssets', { n: DB.assets.length })}</div>`;
-          const s = segs.find(x => x.key === k);
-          return `<div class="t">${s.label}</div><div class="v num">${money(s.value)}</div><div class="p">${pos ? ((s.value / pos) * 100).toFixed(2) : 0}%</div>`;
-        },
-        onHover: k => $$('.legend-row').forEach(r => r.classList.toggle('hl', r.dataset.k === k))
-      });
-      $$('.legend-row').forEach(r => {
-        r.addEventListener('mouseenter', () => { if (r.dataset.k !== 'liability') d.hl(r.dataset.k); });
-        r.addEventListener('mouseleave', () => d.hl(null));
-      });
+    const so = S().allocSort === 'asc' ? 'asc' : 'desc', drill = UI.allocCls;
+    $('#left-tools').innerHTML = `${drill ? `<button class="back-pill" data-action="alloc-back">${ic('chev-l')}${t('backAlloc')}</button>` : ''}<button class="icon-btn sm sort-btn" data-action="alloc-sort" title="${t('allocSortTip')} · ${t('allocSort_' + so)}">${ic(so === 'asc' ? 'sortasc' : 'sortdesc')}</button>`;
+    if (!DB.assets.length) { body.innerHTML = emptyState('assets'); return; }
+    const net = netD();
+    let segs, rows, center;
+    if (!drill) {
+      // 资产总占比：按“主类别”统计；负债不进圆环，单独列出
+      const by = {}; CLASSES.forEach(c => { by[c] = 0; });
+      DB.assets.forEach(a => { by[primary(a)] += aValD(a); });
+      const order = CLASSES.filter(c => c !== 'liability');
+      order.sort((x, y) => (so === 'asc' ? by[x] - by[y] : by[y] - by[x]));
+      order.push('liability');
+      segs = order.filter(c => c !== 'liability').map(c => ({ key: c, label: t('cls_' + c), value: Math.max(0, by[c]), color: CLASS_COLOR[c] }));
+      const pos = segs.reduce((x, y) => x + y.value, 0);
+      rows = order.map(c => ({ key: c, label: t('cls_' + c), color: CLASS_COLOR[c], v: by[c], p: c === 'liability' ? null : (pos ? (Math.max(0, by[c]) / pos) * 100 : 0), click: DB.assets.some(a => primary(a) === c) }));
+      center = k => {
+        if (!k) return `<div class="t">${t('kpiNet')}</div><div class="v num">${money(net)}</div><div class="p">${t('nAssets', { n: DB.assets.length })}</div><div class="p dim2">${t('allocDrillTip')}</div>`;
+        const sg = segs.find(x => x.key === k);
+        return `<div class="t">${sg.label}</div><div class="v num">${money(sg.value)}</div><div class="p">${pos ? ((sg.value / pos) * 100).toFixed(2) : 0}%</div>`;
+      };
+    } else {
+      // 某一类别的占比：类别内每项资产的占比（负债按绝对值画圆环）
+      const list = DB.assets.filter(a => primary(a) === drill).map(a => ({ a, v: aValD(a) }));
+      list.sort((x, y) => (so === 'asc' ? Math.abs(x.v) - Math.abs(y.v) : Math.abs(y.v) - Math.abs(x.v)));
+      const base = CLASS_COLOR[drill], n = list.length;
+      const color = i => (n <= 1 ? base : shade(base, -0.35 + (0.9 * i) / (n - 1)));
+      segs = list.map((x, i) => ({ key: x.a.id, label: x.a.name, value: Math.abs(x.v), color: color(i) }));
+      const tot = list.reduce((x, y) => x + y.v, 0), absTot = segs.reduce((x, y) => x + y.value, 0);
+      const allPos = DB.assets.reduce((x, a) => x + Math.max(0, aValD(a)), 0);
+      rows = list.map((x, i) => ({ key: x.a.id, label: x.a.name, sub: x.a.code || '', color: color(i), v: x.v, p: absTot ? (Math.abs(x.v) / absTot) * 100 : 0, click: false }));
+      center = k => {
+        if (!k) return `<div class="t">${t('clsAlloc', { c: t('cls_' + drill) })}</div><div class="v num">${money(tot)}</div><div class="p">${drill === 'liability' ? t('nItems', { n }) : t('ofTotal', { p: (allPos ? (Math.max(0, tot) / allPos) * 100 : 0).toFixed(2) + '%' })}</div>`;
+        const sg = segs.find(x => x.key === k), r = rows.find(x => x.key === k);
+        return `<div class="t">${esc(sg.label)}</div><div class="v num">${money(r.v)}</div><div class="p">${r.p.toFixed(2)}%</div>`;
+      };
     }
+    const legend = rows.map(r => `<div class="legend-row lg-line ${r.click ? 'clickable' : ''}" data-k="${esc(r.key)}" ${r.click ? 'data-action="alloc-drill" data-v="' + r.key + '"' : ''}><i class="dot" style="background:${r.color}"></i>
+        <div class="lg-name">${esc(r.label)}${r.sub ? `<span class="code">${esc(r.sub)}</span>` : ''}</div>
+        <div class="lg-val num ${r.v < 0 ? 'down' : ''}">${money(r.v)}</div>
+        <div class="lg-pct num">${r.p == null ? '—' : r.p.toFixed(1) + '%'}</div>
+        <div class="lg-bar"><i style="width:${r.p || 0}%;background:${r.color}"></i></div>${r.click ? `<span class="lg-go">${ic('chev-r')}</span>` : ''}</div>`).join('');
+    const head = drill ? `<div class="alloc-crumb"><button data-action="alloc-back">${t('backAlloc')}</button>${ic('chev-r')}<b style="--tc:${CLASS_COLOR[drill]}">${t('clsAlloc', { c: t('cls_' + drill) })}</b></div>` : '';
+    body.innerHTML = `${head}<div class="donut-wrap ${UI.allocAnim || ''}"><div class="donut ${drill ? 'drilled' : 'drillable'}" id="donut"></div><div class="legend">${legend}</div></div>`;
+    UI.allocAnim = '';
+    const d = Charts.donut($('#donut'), segs, {
+      id: drill ? 'alloc-' + drill : 'alloc',
+      center,
+      onHover: k => $$('.legend-row').forEach(r => r.classList.toggle('hl', r.dataset.k === k)),
+      onClick: drill ? null : k => openAllocCls(k),
+      onCenter: drill ? () => closeAllocCls() : null
+    });
+    $$('.legend-row').forEach(r => {
+      r.addEventListener('mouseenter', () => { if (segs.some(x => x.key === r.dataset.k)) d.hl(r.dataset.k); });
+      r.addEventListener('mouseleave', () => d.hl(null));
+    });
   }
+  /** 进入 / 返回某一类别的占比（带翻转动画） */
+  function openAllocCls(c) {
+    if (!c || !DB.assets.some(a => primary(a) === c)) return;
+    UI.allocCls = c; UI.allocAnim = 'flip-in'; renderLeft();
+  }
+  function closeAllocCls() { UI.allocCls = null; UI.allocAnim = 'flip-in'; renderLeft(); }
   /** 排序切换按钮（由高到低 ⇄ 由低到高），key 为设置项名 */
   function sortBtnHTML(key) {
     const asc = S()[key] === 'asc';
@@ -1216,31 +1277,28 @@
     const keys = snapKeys(), now = new Date();
     const cv = v => conv(v, 'USD');
     const mk = (k, s, label, tip) => ({ key: k, label, tip, o: cv(s.o), h: cv(s.h), l: cv(s.l), c: cv(s.c) });
-    if (range === 'month') {
-      const m = ym(now);
-      return keys.filter(k => k.startsWith(m)).map(k => mk(k, DB.snaps[k], String(+k.slice(8)), dayLabel(k)));
-    }
-    if (range === 'year') {
-      const y = String(now.getFullYear()), out = [];
-      for (let i = 1; i <= 12; i++) {
-        const mkey = `${y}-${pad(i)}`, ks = keys.filter(k => k.startsWith(mkey));
-        if (!ks.length) continue;
-        const ss = ks.map(k => DB.snaps[k]);
-        out.push({ key: mkey, label: t('mon' + (i - 1)), tip: zh() ? `${y}年${i}月` : `${t('mon' + (i - 1))} ${y}`,
-          o: cv(ss[0].o), c: cv(ss[ss.length - 1].c), h: cv(Math.max(...ss.map(s => s.h))), l: cv(Math.min(...ss.map(s => s.l))) });
-      }
-      return out;
+    // 月 / 年：把每日快照合并成月线 / 年线（开 = 第一天开，收 = 最后一天收，高低取极值）
+    if (range === 'month' || range === 'year') {
+      const len = range === 'month' ? 7 : 4, groups = {};
+      keys.forEach(k => { (groups[k.slice(0, len)] = groups[k.slice(0, len)] || []).push(k); });
+      return Object.keys(groups).sort().map(g => {
+        const ss = groups[g].map(k => DB.snaps[k]), y = g.slice(0, 4), m = +g.slice(5, 7);
+        return { key: g, label: range === 'month' ? `${y.slice(2)}/${g.slice(5, 7)}` : y,
+          tip: range === 'month' ? (zh() ? `${y}年${m}月` : `${t('mon' + (m - 1))} ${y}`) : (zh() ? `${y}年` : y),
+          o: cv(ss[0].o), c: cv(ss[ss.length - 1].c), h: cv(Math.max(...ss.map(x => x.h))), l: cv(Math.min(...ss.map(x => x.l))) };
+      });
     }
     return keys.map(k => mk(k, DB.snaps[k], `${k.slice(5, 7)}/${k.slice(8)}`, dayLabel(k) + ' ' + k.slice(0, 4)));
   }
   function drawAssetTrend() {
     const s = S(), range = s.assetRange, C = colors();
+    // 顺序：实线 / K 线（最左）→ 日 / 月 / 年 → 日线跨度
     $('#trend-tools').innerHTML = `
-      <div class="seg">${['month', 'year', 'day'].map(r => `<button class="${range === r ? 'on' : ''}" data-action="asset-range" data-v="${r}">${t('ar_' + r)}</button>`).join('')}</div>
-      ${range === 'day' ? `<div class="seg">${Object.keys(K_SPANS).map(k => `<button class="${s.kSpan === k ? 'on' : ''}" data-action="k-span" data-v="${k}">${k === 'ALL' ? t('all') : k}</button>`).join('')}</div>` : ''}
       <div class="seg">
-        <button class="${s.kStyle === 'candle' ? 'on' : ''}" data-action="k-style" data-v="candle" title="${t('kCandle')}">${ic('candle')}</button>
-        <button class="${s.kStyle === 'line' ? 'on' : ''}" data-action="k-style" data-v="line" title="${t('kLine')}">${ic('linechart')}</button></div>`;
+        <button class="${s.kStyle === 'line' ? 'on' : ''}" data-action="k-style" data-v="line" title="${t('kLine')}">${ic('linechart')}</button>
+        <button class="${s.kStyle === 'candle' ? 'on' : ''}" data-action="k-style" data-v="candle" title="${t('kCandle')}">${ic('candle')}</button></div>
+      <div class="seg">${['day', 'month', 'year'].map(r => `<button class="${range === r ? 'on' : ''}" data-action="asset-range" data-v="${r}">${t('ar_' + r)}</button>`).join('')}</div>
+      ${range === 'day' ? `<div class="seg">${Object.keys(K_SPANS).map(k => `<button class="${s.kSpan === k ? 'on' : ''}" data-action="k-span" data-v="${k}">${k === 'ALL' ? t('all') : k}</button>`).join('')}</div>` : ''}`;
     let bars = assetBars(range);
     const all = bars.length;
     if (range === 'day') {
@@ -2697,6 +2755,17 @@
       if (await requireUnlock(UI.page === 'holdings' ? t('verifyAssetMsg') : null)) { refreshLockBtn(); toast(t('unlockedToast'), 'ok'); }
     },
     recover() { openRecovery(); },
+    'alloc-drill'(el) { openAllocCls(el.dataset.v); },
+    'alloc-back'() { closeAllocCls(); },
+    'flip-fund'() {
+      const el = $('#fund-flip'); if (!el) return;
+      el.classList.add('flip-out');
+      setTimeout(() => {
+        UI.fundFace = (UI.fundFace || 'cash') === 'cash' ? 'fund' : 'cash';
+        const cur = $('#fund-flip'); if (cur) cur.outerHTML = fundFlipHTML('flip-in');
+      }, 180);
+    },
+    'toggle-total'() { S().hideTotal = !S().hideTotal; save(); renderKPIs(); },
     'toggle-gistid'(el) {
       UI.showGistId = !UI.showGistId;
       const inp = $('[data-set="gistId"]'); if (inp) inp.type = UI.showGistId ? 'text' : 'password';

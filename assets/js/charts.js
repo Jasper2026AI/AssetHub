@@ -107,8 +107,9 @@
     el.querySelectorAll('.donut-seg').forEach(n => {
       n.addEventListener('mouseenter', () => api.hl(n.dataset.k));
       n.addEventListener('mouseleave', () => api.hl(null));
-      n.addEventListener('click', () => api.hl(n.classList.contains('hl') ? null : n.dataset.k));
+      n.addEventListener('click', () => { if (opt.onClick) opt.onClick(n.dataset.k); else api.hl(n.classList.contains('hl') ? null : n.dataset.k); });
     });
+    if (opt.onCenter) { center.classList.add('clickable'); center.addEventListener('click', opt.onCenter); }
     return api;
   }
 

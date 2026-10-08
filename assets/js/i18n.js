@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    cashTotal: '现金总余额', cashNet: '今日结余', cashDayInc: '现金日收入', cashDayExp: '现金日支出', flipTip: '点击翻转', flipToFund: '翻转查看基金', flipToCash: '翻转查看现金', clsAlloc: '{c}占比', backAlloc: '资产总占比', allocDrillTip: '点击类别查看占比明细', ofTotal: '占总资产 {p}', rankOnlyTotal: '资产排行仅在资产总占比下可用', hideTotal: '隐藏 / 显示总资产', nItems: '{n} 项',
     goldSrc_goldapi: 'gold-api.com 现货金价（可直接按人民币报价）', goldSrc_paxg: 'Binance PAXG（美元报价，按汇率换算）', goldSrcHint: '黄金资产代码填 XAU。gold-api.com 按资产的计价货币直接报价（如选 CNY、单位选克，就是人民币/克）；它是国际现货价，与上海金交所 Au99.99 可能有少量溢价差。取不到时自动改用 PAXG。',
     unitPh: '如 g、oz、份、股', unitPresets: '件,份,股,枚,张,手', qtyPh: '不填则按 1 份计，单价即总市值',
     whAll: '全部仓库', whNone: '未填写', showHide: '显示 / 隐藏',
@@ -35,8 +36,8 @@ window.AV_I18N = {
     allocSortTip: '占比排序', allocSort_default: '默认', allocSort_desc: '高→低', allocSort_asc: '低→高',
     transfer: '转账', cat_transfer: '转账', transferFrom: '转出账户', transferTo: '转入账户', received: '到账金额', pickAcct: '选择现金 / 负债账户',
     errTransferQty: '转出数量（含手续费）超过持有数量 {q}', errRecv: '请填写到账数量', transferValue: '按现价约 {v} · 当前持有 {q}', errTransferAcct: '请选择转出和转入账户', errTransferSame: '转出和转入不能是同一个账户', transferDone: '已转账',
-    rankTotalTitle: '总变化排行', rankTotalSum: '累计合计', rankTotalHint: '价格类为浮动盈亏，现金为录入以来余额变化',
-    rankDayTitle: '日变化排行', rankDaySum: '今日合计', rankDayHint: '含现金余额与手动更新', noChange: '无变化', colDay: '今日盈亏', sort_dayDesc: '今日涨最多', sort_dayAsc: '今日跌最多',
+    rankTotalTitle: '资产总盈亏', rankTotalSum: '累计合计', rankTotalHint: '价格类为浮动盈亏，现金为录入以来余额变化',
+    rankDayTitle: '资产日盈亏', rankDaySum: '今日合计', rankDayHint: '含现金余额与手动更新', noChange: '无变化', colDay: '今日盈亏', sort_dayDesc: '今日涨最多', sort_dayAsc: '今日跌最多',
     syncOff: '未设置多端同步（点击前往设置）', syncing: '同步中…', syncDirty: '本机有修改尚未同步', syncOk: '已同步',
     syncNeedSetup: '请先在“数据设置 → 多端同步”填写 GitHub Token', syncPushed: '已上传到云端', syncPulled: '已从云端更新到最新数据',
     syncUpToDate: '已是最新，无需同步', syncFail: '同步失败', syncNowBtn: '立即同步',
@@ -53,19 +54,19 @@ window.AV_I18N = {
     ccySwitched: '资产单位已切换为 {c}',
 
     /* 指标卡 */
-    kpiNet: '总资产', kpiDay: '总资产日盈亏', kpiMonth: '总资产月盈亏', kpiYear: '总资产年盈亏',
+    kpiNet: '总资产', kpiDay: '投资日盈亏', kpiMonth: '投资月盈亏', kpiYear: '投资年盈亏',
     vsDay: '较昨收', vsMonth: '较上月末', vsYear: '较去年末',
     kpiClsTotal: '{c}总盈亏', kpiClsDay: '{c}日盈亏', mktValue: '市值',
     quoteAt: '行情更新', never: '尚未更新', nAssets: '{n} 项资产', balance: '结余',
 
     /* 总览 */
-    allocTitle: '资产占比', rankTitle: '资产排行', live: '动态更新', viewHoldings: '查看持仓', viewAll: '查看全部',
+    allocTitle: '资产总占比', rankTitle: '资产排行', live: '动态更新', viewHoldings: '查看持仓', viewAll: '查看全部',
     hideAmt: '隐藏金额', showAmt: '显示金额', amtHidden: '金额已隐藏', amtShown: '金额已显示',
     demoAuto: '已自动加载演示数据，可在“数据设置”中清空或导入你自己的数据',
     allCls: '全部类别', noMatchCls: '该类别下暂无资产',
     trendTitle: '收支趋势', assetTrendTitle: '资产趋势',
     r_week: '本周', r_month: '本月', r_year: '本年', yStep: '刻度', auto: '自动',
-    ar_month: '月内', ar_year: '年内', ar_day: '日线',
+    ar_month: '月', ar_year: '年', ar_day: '日',
     kCandle: 'K 线图', kLine: '实线图', kOpen: '开', kHigh: '最高', kLow: '最低', kClose: '收', kChange: '涨跌',
     kDragHint: '拖动平移 · 滚轮缩放', noSnap: '资产趋势记录中', noSnapSub: '每天打开或刷新行情时会自动记录一次总资产快照，逐日形成 K 线',
     income: '收入', expense: '支出', all: '全部',
@@ -194,6 +195,7 @@ window.AV_I18N = {
   },
 
   en: {
+    cashTotal: 'Cash balance', cashNet: 'Net today', cashDayInc: 'Cash in today', cashDayExp: 'Cash out today', flipTip: 'Tap to flip', flipToFund: 'Flip to fund', flipToCash: 'Flip to cash', clsAlloc: '{c} allocation', backAlloc: 'Total allocation', allocDrillTip: 'Click a class to see its breakdown', ofTotal: '{p} of total', rankOnlyTotal: 'Ranking is available in total allocation', hideTotal: 'Hide / show total assets', nItems: '{n} items',
     goldSrc_goldapi: 'gold-api.com spot gold (quotes directly in CNY etc.)', goldSrc_paxg: 'Binance PAXG (USD, converted by FX)', goldSrcHint: 'Use code XAU. gold-api.com quotes in the asset’s currency (CNY + gram = CNY per gram). It is international spot and may differ slightly from SGE Au99.99. Falls back to PAXG if unavailable.',
     unitPh: 'e.g. g, oz, units, shares', unitPresets: 'pc,units,shares,coins', qtyPh: 'Leave empty to treat as 1 lot (price = total value)',
     whAll: 'All custodies', whNone: 'Not set', showHide: 'Show / hide',
@@ -224,8 +226,8 @@ window.AV_I18N = {
     allocSortTip: 'Sort by share', allocSort_default: 'Default', allocSort_desc: 'High→Low', allocSort_asc: 'Low→High',
     transfer: 'Transfer', cat_transfer: 'Transfer', transferFrom: 'From account', transferTo: 'To account', received: 'Received', pickAcct: 'Choose a cash / liability account',
     errTransferQty: 'Amount plus fee exceeds holding ({q})', errRecv: 'Enter the received amount', transferValue: '≈ {v} at current price · holding {q}', errTransferAcct: 'Choose both accounts', errTransferSame: 'From and To must be different accounts', transferDone: 'Transferred',
-    rankTotalTitle: 'All-time Movers', rankTotalSum: 'Total', rankTotalHint: 'unrealized P/L; cash = balance change since added',
-    rankDayTitle: 'Today’s Movers', rankDaySum: 'Today total', rankDayHint: 'incl. cash balances & manual updates', noChange: 'no change', colDay: 'Today', sort_dayDesc: 'Top gainers today', sort_dayAsc: 'Top losers today',
+    rankTotalTitle: 'Asset Total P/L', rankTotalSum: 'Total', rankTotalHint: 'unrealized P/L; cash = balance change since added',
+    rankDayTitle: 'Asset Day P/L', rankDaySum: 'Today total', rankDayHint: 'incl. cash balances & manual updates', noChange: 'no change', colDay: 'Today', sort_dayDesc: 'Top gainers today', sort_dayAsc: 'Top losers today',
     syncOff: 'Sync not set up (click to configure)', syncing: 'Syncing…', syncDirty: 'Local changes not yet synced', syncOk: 'Synced',
     syncNeedSetup: 'Add a GitHub token under Settings → Multi-device Sync first', syncPushed: 'Uploaded to cloud', syncPulled: 'Updated from cloud',
     syncUpToDate: 'Already up to date', syncFail: 'Sync failed', syncNowBtn: 'Sync now',
@@ -241,18 +243,18 @@ window.AV_I18N = {
     ccy_USD: 'US Dollar', ccy_CNY: 'Chinese Yuan', ccy_HKD: 'HK Dollar', ccy_TWD: 'New Taiwan Dollar', ccy_OTHER: 'Other',
     ccySwitched: 'Currency switched to {c}',
 
-    kpiNet: 'Total Assets', kpiDay: 'Day P/L', kpiMonth: 'Month P/L', kpiYear: 'Year P/L',
+    kpiNet: 'Total Assets', kpiDay: 'Investment Day P/L', kpiMonth: 'Investment Month P/L', kpiYear: 'Investment Year P/L',
     vsDay: 'vs. prev close', vsMonth: 'vs. last month-end', vsYear: 'vs. last year-end',
     kpiClsTotal: '{c} Total P/L', kpiClsDay: '{c} Day P/L', mktValue: 'Value',
     quoteAt: 'Quotes updated', never: 'never', nAssets: '{n} assets', balance: 'Balance',
 
-    allocTitle: 'Allocation', rankTitle: 'Asset Ranking', live: 'Live', viewHoldings: 'View assets', viewAll: 'View all',
+    allocTitle: 'Total Allocation', rankTitle: 'Asset Ranking', live: 'Live', viewHoldings: 'View assets', viewAll: 'View all',
     hideAmt: 'Hide amounts', showAmt: 'Show amounts', amtHidden: 'Amounts hidden', amtShown: 'Amounts shown',
     demoAuto: 'Demo data loaded automatically — clear it or import your own under Settings',
     allCls: 'All classes', noMatchCls: 'No assets in this class',
     trendTitle: 'Cash Flow', assetTrendTitle: 'Asset Trend',
     r_week: 'Week', r_month: 'Month', r_year: 'Year', yStep: 'Scale', auto: 'Auto',
-    ar_month: 'Month', ar_year: 'Year', ar_day: 'Daily',
+    ar_month: 'Month', ar_year: 'Year', ar_day: 'Day',
     kCandle: 'Candlestick', kLine: 'Line', kOpen: 'Open', kHigh: 'High', kLow: 'Low', kClose: 'Close', kChange: 'Change',
     kDragHint: 'Drag to pan · scroll to zoom', noSnap: 'Building asset history', noSnapSub: 'A snapshot of your total assets is saved each day you open the app or refresh quotes',
     income: 'Income', expense: 'Expense', all: 'All',
