@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -982,7 +982,7 @@
   /** 第四张卡：默认显示现金，底部中间按钮翻转到基金 */
   function fundFlipHTML(anim) {
     const face = UI.fundFace || 'cash';
-    const btn = `<button class="flip-btn" data-action="flip-fund" title="${t('flipTip')}">${ic('swap')}${face === 'cash' ? t('cls_fund') : t('cls_cash')}</button>`;
+    const btn = `<button class="flip-btn" data-action="flip-fund" title="${face === 'cash' ? t('flipToFund') : t('flipToCash')}" aria-label="${face === 'cash' ? t('flipToFund') : t('flipToCash')}">${ic('swap')}</button>`;
     const extra = { cls: 'flip-card ' + (anim || ''), attr: 'id="fund-flip"', btn };
     if (face === 'fund') return classCardHTML('fund', extra);
     const cs = cashStats();
