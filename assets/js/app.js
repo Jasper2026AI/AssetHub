@@ -52,7 +52,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1140,7 +1140,7 @@
       segs = list.map((x, i) => ({ key: x.a.id, label: x.a.name, value: Math.abs(x.v), color: color(i) }));
       const tot = list.reduce((x, y) => x + y.v, 0), absTot = segs.reduce((x, y) => x + y.value, 0);
       const allPos = DB.assets.reduce((x, a) => x + Math.max(0, aValD(a)), 0);
-      rows = list.map((x, i) => ({ key: x.a.id, label: x.a.name, sub: x.a.code || '', color: color(i), v: x.v, p: absTot ? (Math.abs(x.v) / absTot) * 100 : 0, click: false }));
+      rows = list.map((x, i) => ({ key: x.a.id, label: x.a.name, sub: x.a.code || '', wh: x.a.warehouse || '', color: color(i), v: x.v, p: absTot ? (Math.abs(x.v) / absTot) * 100 : 0, click: false }));
       center = k => {
         if (!k) return `<div class="t">${t('clsAlloc', { c: t('cls_' + drill) })}</div><div class="v num">${money(tot)}</div><div class="p">${drill === 'liability' ? t('nItems', { n }) : t('ofTotal', { p: (allPos ? (Math.max(0, tot) / allPos) * 100 : 0).toFixed(2) + '%' })}</div>`;
         const sg = segs.find(x => x.key === k), r = rows.find(x => x.key === k);
@@ -1148,7 +1148,7 @@
       };
     }
     const legend = rows.map(r => `<div class="legend-row lg-line ${r.click ? 'clickable' : ''}" data-k="${esc(r.key)}" ${r.click ? 'data-action="alloc-drill" data-v="' + r.key + '"' : ''}><i class="dot" style="background:${r.color}"></i>
-        <div class="lg-name">${esc(r.label)}${r.sub ? `<span class="code">${esc(r.sub)}</span>` : ''}</div>
+        <div class="lg-name">${esc(r.label)}${r.sub ? `<span class="code">${esc(r.sub)}</span>` : ''}${r.wh ? `<span class="rk-wh">${esc(r.wh)}</span>` : ''}</div>
         <div class="lg-val num ${r.v < 0 ? 'down' : ''}">${money(r.v)}</div>
         <div class="lg-pct num">${r.p == null ? '—' : r.p.toFixed(1) + '%'}</div>
         <div class="lg-bar"><i style="width:${r.p || 0}%;background:${r.color}"></i></div>${r.click ? `<span class="lg-go">${ic('chev-r')}</span>` : ''}</div>`).join('');
@@ -1219,7 +1219,7 @@
         const a = x.a, z = Math.abs(x.ch) < 0.005;
         return `<div class="rank-row ${z ? 'zero' : ''}">
           <span class="rank-no">${i + 1}</span>
-          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}</div>
+          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}${a.warehouse ? `<span class="rk-wh">${esc(a.warehouse)}</span>` : ''}</div>
             <div class="bar"><i style="width:${z ? 0 : Math.max(2, (Math.abs(x.ch) / top) * 100)}%;background:${x.ch < 0 ? 'var(--down)' : 'var(--up)'}"></i></div></div>
           <div class="rank-val num ${z ? 'dim' : upDown(x.ch)}">${z ? '—' : money(x.ch, { sign: true })}<small class="${z ? 'dim' : upDown(x.ch)}">${z ? t('noChange') : pct(x.pct)} · ${money(aValD(a))}</small></div>
         </div>`;
@@ -1241,7 +1241,7 @@
         const a = x.a, bal = isBalance(a), cost = aCostD(a), pnl = x.v - cost;
         return `<div class="rank-row">
           <span class="rank-no">${i + 1}</span>
-          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}</div>
+          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}${a.warehouse ? `<span class="rk-wh">${esc(a.warehouse)}</span>` : ''}</div>
             <div class="bar"><i style="width:${Math.max(2, (Math.abs(x.v) / topV) * 100)}%;${x.v < 0 ? 'background:var(--down)' : ''}"></i></div></div>
           <div class="rank-val num ${x.v < 0 ? 'down' : ''}">${money(x.v)}<small class="${bal ? 'dim' : upDown(pnl)}">${bal ? ((Math.max(0, x.v) / total) * 100).toFixed(1) + '% · ' + clsLabel(a) : pct(cost ? (pnl / Math.abs(cost)) * 100 : 0)}</small></div>
         </div>`;
@@ -1592,7 +1592,7 @@
     if (L.cat !== 'all' && !cats.includes(L.cat)) L.cat = 'all';
     const statRow = (mode, key) => {
       const r = statsOf(x => inPeriod(x, mode, L.date)), bal = r.inc - r.exp;
-      return `<div class="stat-row-h"><span class="srh-l">${t('per_' + mode)}<small>${periodLabel(mode, L.date)}</small></span></div>
+      return `<div class="stat-row-h glass"><span class="ico">${ic(mode === 'day' ? 'clock' : 'cal')}</span><span class="srh-l"><b>${t('per_' + mode)}</b><small>${periodLabel(mode, L.date)}</small></span></div>
         <div class="sumbox glass"><div class="l">${t(key + 'Inc')}</div><div class="v num up">${money(r.inc, { sign: true })}</div></div>
         <div class="sumbox glass"><div class="l">${t(key + 'Exp')}</div><div class="v num down">${money(-r.exp)}</div></div>
         <div class="sumbox glass"><div class="l">${t(key + 'Bal')}</div><div class="v num ${upDown(bal)}">${money(bal, { sign: true })}</div></div>

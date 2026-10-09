@@ -601,10 +601,13 @@ svg.i.lk{width:14px;height:14px;color:var(--accent);flex:none}
 .tbl th.sortable.on .arr{opacity:1}
 
 /* 收支统计：日 / 月 / 年 三行 */
-.sumgrid{display:grid;grid-template-columns:96px repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px;align-items:stretch}
-.stat-row-h{display:flex;align-items:center}
-.srh-l{font-size:20px;font-weight:800;color:var(--accent);line-height:1.1}
-.srh-l small{display:block;font-size:11.5px;color:var(--text-3);font-weight:600;margin-top:3px}
+.sumgrid{display:grid;grid-template-columns:168px repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px;align-items:stretch}
+.stat-row-h{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;min-width:0}
+.stat-row-h .ico{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:none}
+.stat-row-h .ico svg.i{width:16px;height:16px}
+.srh-l{display:flex;flex-direction:column;min-width:0;line-height:1.2}
+.srh-l b{font-size:14px;font-weight:700;color:#fff}
+.srh-l small{font-size:11.5px;color:var(--text-3);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sumgrid .sumbox{padding:12px 16px;border-radius:16px}
 .sumgrid .sumbox .v{font-size:17px}
 
@@ -651,7 +654,8 @@ body.mobile .kpi.sm .lbl{font-size:11.5px}
 body.mobile .legend-2{grid-template-columns:1fr 1fr}
 body.mobile .sumgrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 body.mobile .sumgrid .stat-row-h{grid-column:1/-1;margin-top:4px}
-body.mobile .srh-l{font-size:15px;display:flex;gap:8px;align-items:baseline}
+body.mobile .stat-row-h{padding:8px 10px;border-radius:13px}
+body.mobile .srh-l{flex-direction:row;gap:8px;align-items:baseline}
 body.mobile .sumgrid .sumbox{padding:9px 10px;border-radius:13px}
 body.mobile .sumgrid .sumbox .l{font-size:10.5px}
 body.mobile .sumgrid .sumbox .v{font-size:13px}
@@ -660,7 +664,7 @@ body.mobile .batch-bar{top:auto;bottom:96px;position:sticky}
 body.mobile .toolbar .search{flex-basis:100%}
 body.mobile .section-head .head-tools{width:100%}
 body.mobile .seg-title button{font-size:15px;padding:5px 10px}
-@media (max-width:1180px){.sumgrid{grid-template-columns:80px repeat(4,minmax(0,1fr))}}
+@media (max-width:1180px){.sumgrid{grid-template-columns:150px repeat(4,minmax(0,1fr))}}
 @media (max-width:760px){.legend-2{grid-template-columns:1fr}.cls-grid{grid-template-columns:repeat(2,1fr)}}
 .g-ov>.card{display:flex;flex-direction:column}
 .g-ov>.card>.donut-wrap{flex:1}
@@ -933,3 +937,15 @@ body.mobile .upd-bar{bottom:calc(84px + env(safe-area-inset-bottom))}
 .pnl-custom input[type=color]{width:34px;height:26px;padding:0;border:1px solid rgba(255,255,255,.15);border-radius:8px;background:none;cursor:pointer}
 .pnl-custom input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
 .pnl-custom input[type=color]::-webkit-color-swatch{border:0;border-radius:6px}
+
+/* ===== 排行 / 占比里的仓库小字 ===== */
+.rk-wh{font-size:11px;color:var(--text-3);font-weight:500;margin-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;flex:none}
+.lg-line .lg-name{max-width:none}
+.lg-name .rk-wh{display:block;margin:2px 0 0;max-width:none;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:760px){
+  .sumgrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .sumgrid .stat-row-h{grid-column:1/-1;padding:8px 10px;border-radius:13px}
+  .sumgrid .srh-l{flex-direction:row;gap:8px;align-items:baseline}
+  .sumgrid .sumbox{padding:9px 10px;border-radius:13px}
+  .sumgrid .sumbox .v{font-size:13px}
+}
