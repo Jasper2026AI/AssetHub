@@ -45,7 +45,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1929,7 +1929,7 @@
         <input class="input num" id="tf-fee" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${st.fee > 0 ? esc(trim8(st.fee)) : ''}">
         <div class="hint" id="tf-fee-hint"></div></div>
       <div class="field" id="tf-cats-wrap"><label>${t('category')}</label><div class="cat-grid" id="tf-cats"></div></div>
-      <label class="switch-row" id="tf-sync-row"><span>${t('syncBalance')}<small>${t('syncBalanceSub')}</small></span>
+      <label class="switch-row" id="tf-sync-row"><span>${t('syncBalance')}<small id="tf-sync-sub">${t('syncBalanceSub')}</small></span>
         <span class="switch"><input type="checkbox" id="tf-sync" ${st.sync ? 'checked' : ''}><i></i></span></label>
       <div class="field" style="margin-bottom:4px"><label>${t('noteOpt')}</label><input class="input" id="tf-note" maxlength="120" value="${esc(st.note)}" placeholder="${t('notePh')}"></div>`;
     openModal({
@@ -1944,7 +1944,19 @@
           $('#tf-cats', m).innerHTML = cats.map(c => `<button type="button" class="cat ${st.cat === c ? 'on' : ''}" data-v="${c}"><span class="e">${CAT_ICON[c]}</span>${catName(c)}</button>`).join('');
         };
         const isTr = () => st.type === 'transfer';
-        const syncRow = () => { const a = findAsset($('#tf-acct', m).value); $('#tf-sync-row', m).style.display = !isTr() && a && isBalance(a) ? '' : 'none'; };
+        /** 同步余额：现金 / 负债按金额加减；其他资产按现价折算成数量加减（收入按价值计入成本，支出不改平均成本） */
+        const syncRow = () => {
+          const a = findAsset($('#tf-acct', m).value), row = $('#tf-sync-row', m), sub = $('#tf-sync-sub', m);
+          row.style.display = !isTr() && a ? '' : 'none';
+          if (!a || isTr()) return;
+          if (isBalance(a)) { sub.textContent = t('syncBalanceSub'); return; }
+          const px = syncPx(a), amt = parseNum($('#tf-amount', m).value) || 0, c = curCcy();
+          if (!(px > 0)) { sub.textContent = t('syncNoPrice'); return; }
+          const dq = validCcy(c) ? conv(amt, c, aCcy(a)) / px : 0, u = a.noQty ? t('syncLots') : (qtyUnit(a) || '');
+          sub.textContent = t('syncQtySub', { q: `${st.type === 'income' ? '+' : '−'}${trim8(round8(dq))} ${u}`.trim(), p: money(px, { ccy: aCcy(a), max: 8, raw: true }) });
+        };
+        // 编辑已同步过的记录时沿用当时的价格，避免因行情变化导致数量对不上
+        const syncPx = a => (ex && ex.applied && ex.accountId === a.id && ex.appliedPx > 0 ? +ex.appliedPx : +a.price || 0);
         let recvTouched = !!(ex && ex.type === 'transfer');
         /** 转账：可在任意资产之间互转。金额框填转出“数量”（现金类为金额）；到账数量按价值自动折算，可手动改 */
         const trSync = () => {
@@ -1992,6 +2004,8 @@
         $('#tf-recv', m).addEventListener('input', () => { recvTouched = true; });
         $('#tf-fee', m).addEventListener('input', trSync);
         $('#tf-amount', m).addEventListener('input', trSync);
+        $('#tf-amount', m).addEventListener('input', syncRow);
+        $('#tf-ccy', m).addEventListener('change', syncRow);
         $('#tf-cats', m).addEventListener('click', e => {
           const b = e.target.closest('[data-v]'); if (!b) return;
           st.cat = b.dataset.v; $$('#tf-cats .cat', m).forEach(x => x.classList.toggle('on', x === b));
@@ -2065,10 +2079,20 @@
           if (ex) applyTx(ex, -1);
           ['toId', 'toAmount', 'toCcy', 'fee', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
-          const a = findAsset(tx.accountId);
-          if (a && isBalance(a) && $('#tf-sync', m).checked) {
-            tx.applied = true;
-            tx.appliedDelta = round8((tx.type === 'income' ? 1 : -1) * conv(tx.amount, tx.ccy, aCcy(a)));
+          delete tx.appliedPx; delete tx.appliedCost;
+          const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;
+          if (a && $('#tf-sync', m).checked) {
+            if (isBalance(a)) {
+              tx.applied = true;
+              tx.appliedDelta = round8(sgn * conv(tx.amount, tx.ccy, aCcy(a)));
+            } else {
+              const px = syncPx(a), val = conv(tx.amount, tx.ccy, aCcy(a));
+              if (!(px > 0)) { if (ex) applyTx(ex, 1); toast(t('syncNoPrice'), 'err'); return; }
+              const dq = round8(val / px);
+              if (sgn < 0 && dq > (+a.qty || 0) + 1e-9) { if (ex) applyTx(ex, 1); toast(t('errSpendQty', { q: `${trim8(+a.qty || 0)} ${qtyUnit(a)}` }), 'err'); return; }
+              tx.applied = true; tx.appliedDelta = sgn * dq; tx.appliedPx = px;
+              if (sgn > 0) tx.appliedCost = round8(val);   // 收入：按收到时的价值计入成本（不算投资盈利）
+            }
             applyTx(tx, 1);
           }
           if (!ex) DB.txs.push(tx);
@@ -2095,8 +2119,12 @@
     }
     if (!tx.applied || !tx.accountId) return;
     const a = findAsset(tx.accountId);
-    if (!a || !isBalance(a)) return;
-    a.qty = round8((+a.qty || 0) + (+tx.appliedDelta || 0) * sign);
+    if (!a) return;
+    if (isBalance(a)) { a.qty = round8((+a.qty || 0) + (+tx.appliedDelta || 0) * sign); return; }
+    // 非现金资产：数量按记录时折算的数量加减；收入同时按价值摊入平均成本（与转账一致，可完整回滚）
+    const q = +a.qty || 0, nq = q + (+tx.appliedDelta || 0) * sign;
+    if (tx.appliedCost && nq > 1e-12) a.cost = round8((q * (+a.cost || 0) + (+tx.appliedCost || 0) * sign) / nq);
+    a.qty = round8(nq);
   }
 
   /* ---- 添加 / 编辑资产 ---- */

@@ -4,6 +4,7 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    errSpendQty: '支出折算的数量超过持有数量 {q}，可关闭“同步更新账户余额”或改用其他账户', syncQtySub: '按现价 {p} 折算数量：{q}；收入按价值计入成本，编辑或删除时自动回滚', syncNoPrice: '这项资产还没有单价，无法折算数量，请先填写或获取单价', syncLots: '份',
     cashTotal: '现金总余额', cashNet: '今日结余', cashDayInc: '现金日收入', cashDayExp: '现金日支出', flipTip: '点击翻转', flipToFund: '翻转查看基金', flipToCash: '翻转查看现金', clsAlloc: '{c}占比', backAlloc: '资产总占比', allocDrillTip: '点击类别查看占比明细', ofTotal: '占总资产 {p}', rankOnlyTotal: '资产排行仅在资产总占比下可用', hideTotal: '隐藏 / 显示总资产', nItems: '{n} 项',
     goldSrc_goldapi: 'gold-api.com 现货金价（可直接按人民币报价）', goldSrc_paxg: 'Binance PAXG（美元报价，按汇率换算）', goldSrcHint: '黄金资产代码填 XAU。gold-api.com 按资产的计价货币直接报价（如选 CNY、单位选克，就是人民币/克）；它是国际现货价，与上海金交所 Au99.99 可能有少量溢价差。取不到时自动改用 PAXG。',
     unitPh: '如 g、oz、份、股', unitPresets: '件,份,股,枚,张,手', qtyPh: '不填则按 1 份计，单价即总市值',
@@ -122,7 +123,7 @@ window.AV_I18N = {
 
     /* 记一笔 */
     txNew: '记一笔', txEdit: '编辑记录', date: '日期', category: '资金分类', account: '关联资产账户', noteOpt: '备注（可选）', notePh: '写点什么…',
-    syncBalance: '同步更新账户余额', syncBalanceSub: '仅现金 / 负债账户；编辑或删除记录时自动回滚',
+    syncBalance: '同步更新账户余额', syncBalanceSub: '按金额加减账户余额；编辑或删除记录时自动回滚',
     cancel: '取消', save: '保存', confirm: '确定', txSaved: '已记录 {a}',
     cat_food: '餐饮美食', cat_daily: '日用百货', cat_transport: '交通出行', cat_housing: '住房物业', cat_leisure: '休闲娱乐',
     cat_digital: '科技数码', cat_subscription: '数字订阅', cat_medical: '医疗健康', cat_social: '人情来往', cat_investLoss: '投资亏损', cat_otherExp: '其他支出',
@@ -195,6 +196,7 @@ window.AV_I18N = {
   },
 
   en: {
+    errSpendQty: 'The converted quantity exceeds the holding ({q}); turn off balance sync or pick another account', syncQtySub: 'Converted at {p}: {q}; income is added to cost basis; reverted on edit or delete', syncNoPrice: 'This asset has no price yet, so the amount can’t be converted to quantity', syncLots: 'lot(s)',
     cashTotal: 'Cash balance', cashNet: 'Net today', cashDayInc: 'Cash in today', cashDayExp: 'Cash out today', flipTip: 'Tap to flip', flipToFund: 'Flip to fund', flipToCash: 'Flip to cash', clsAlloc: '{c} allocation', backAlloc: 'Total allocation', allocDrillTip: 'Click a class to see its breakdown', ofTotal: '{p} of total', rankOnlyTotal: 'Ranking is available in total allocation', hideTotal: 'Hide / show total assets', nItems: '{n} items',
     goldSrc_goldapi: 'gold-api.com spot gold (quotes directly in CNY etc.)', goldSrc_paxg: 'Binance PAXG (USD, converted by FX)', goldSrcHint: 'Use code XAU. gold-api.com quotes in the asset’s currency (CNY + gram = CNY per gram). It is international spot and may differ slightly from SGE Au99.99. Falls back to PAXG if unavailable.',
     unitPh: 'e.g. g, oz, units, shares', unitPresets: 'pc,units,shares,coins', qtyPh: 'Leave empty to treat as 1 lot (price = total value)',
@@ -304,7 +306,7 @@ window.AV_I18N = {
     emptyTx: 'No entries yet', emptyTxSub: 'Tap “New Entry” to record your first transaction', loadDemo: 'Load demo data',
 
     txNew: 'New Entry', txEdit: 'Edit Entry', date: 'Date', category: 'Category', account: 'Linked account', noteOpt: 'Note (optional)', notePh: 'Add a note…',
-    syncBalance: 'Update account balance', syncBalanceSub: 'Cash / liability accounts only; reverted on edit or delete',
+    syncBalance: 'Update account balance', syncBalanceSub: 'Adds / subtracts the amount; reverted on edit or delete',
     cancel: 'Cancel', save: 'Save', confirm: 'OK', txSaved: 'Recorded {a}',
     cat_food: 'Food & Dining', cat_daily: 'Groceries', cat_transport: 'Transport', cat_housing: 'Housing', cat_leisure: 'Entertainment',
     cat_digital: 'Tech & Gadgets', cat_subscription: 'Subscriptions', cat_medical: 'Health', cat_social: 'Gifts & Social', cat_investLoss: 'Investment Loss', cat_otherExp: 'Other',
