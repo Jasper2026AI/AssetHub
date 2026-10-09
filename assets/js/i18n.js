@@ -4,6 +4,8 @@
    ========================================================= */
 window.AV_I18N = {
   zh: {
+    kpiInvTotal: '投资总盈亏', costBasis: '成本', flipToTotal: '翻转查看投资总盈亏', flipToYear: '翻转查看投资年盈亏', pnl_gold: '金紫', pnl_ocean: '海蓝', pnl_sakura: '樱花', pnl_mono: '黑白', pnl_custom: '自定义', pnlCustom: '自定义颜色（选色后自动切换为“自定义”）', pnlUpC: '盈利', pnlDownC: '亏损',
+    fillMode: '填写方式', fillBal: '按余额（金额）', fillQty: '按数量 × 单价', fillBalHint: '像现金一样直接填金额，不计盈亏；之后用「余额」按钮更新，增减计入资产日盈亏。适合交易所里的 USD / USDT 余额、理财余额等。', fillQtyHint: '按持仓数量和单价计算市值与盈亏，用「更新」按钮修改市值。', 
     errSpendQty: '支出折算的数量超过持有数量 {q}，可关闭“同步更新账户余额”或改用其他账户', syncQtySub: '按现价 {p} 折算数量：{q}；收入按价值计入成本，编辑或删除时自动回滚', syncNoPrice: '这项资产还没有单价，无法折算数量，请先填写或获取单价', syncLots: '份',
     cashTotal: '现金总余额', cashNet: '今日结余', cashDayInc: '现金日收入', cashDayExp: '现金日支出', flipTip: '点击翻转', flipToFund: '翻转查看基金', flipToCash: '翻转查看现金', clsAlloc: '{c}占比', backAlloc: '资产总占比', allocDrillTip: '点击类别查看占比明细', ofTotal: '占总资产 {p}', rankOnlyTotal: '资产排行仅在资产总占比下可用', hideTotal: '隐藏 / 显示总资产', nItems: '{n} 项',
     goldSrc_goldapi: 'gold-api.com 现货金价（可直接按人民币报价）', goldSrc_paxg: 'Binance PAXG（美元报价，按汇率换算）', goldSrcHint: '黄金资产代码填 XAU。gold-api.com 按资产的计价货币直接报价（如选 CNY、单位选克，就是人民币/克）；它是国际现货价，与上海金交所 Au99.99 可能有少量溢价差。取不到时自动改用 PAXG。',
@@ -31,11 +33,11 @@ window.AV_I18N = {
     act_create: '新增', act_edit: '修改', act_delete: '删除', act_lock: '锁仓', act_unlock: '解除锁仓', act_updVal: '更新市值', act_updBal: '更新余额', act_balByTx: '余额变动',
     act_import: '导入数据', act_demo: '加载演示数据', act_cloudPull: '从云端同步',
     lockYes: '是', lockNo: '否',
-    fld_name: '名称', fld_code: '代码', fld_cls: '类别', fld_warehouse: '仓库', fld_ccy: '币种', fld_qty: '数量 / 余额', fld_cost: '成本均价', fld_price: '单价', fld_unit: '单位', fld_source: '行情来源', fld_note: '备注', fld_locked: '锁仓', fld_value: '市值',
+    fld_name: '名称', fld_code: '代码', fld_cls: '类别', fld_warehouse: '仓库', fld_ccy: '币种', fld_qty: '数量 / 余额', fld_cost: '成本均价', fld_price: '单价', fld_unit: '单位', fld_source: '行情来源', fld_note: '备注', fld_locked: '锁仓', fld_balMode: '填写方式', fld_value: '市值',
     fld_date: '日期', fld_type: '类型', fld_cat: '分类', fld_amount: '金额', fld_accountId: '账户', fld_toId: '转入账户', fld_toAmount: '到账金额', fld_fee: '手续费',
     fee: '手续费', feeHint: '转出资产共扣除 {a}；手续费按价值计入当日支出', feeHint0: '从转出资产额外扣除，并按价值计入支出统计',
     allocSortTip: '占比排序', allocSort_default: '默认', allocSort_desc: '高→低', allocSort_asc: '低→高',
-    transfer: '转账', cat_transfer: '转账', transferFrom: '转出账户', transferTo: '转入账户', received: '到账金额', pickAcct: '选择现金 / 负债账户',
+    transfer: '转账', cat_transfer: '转账', transferFrom: '转出账户', transferTo: '转入账户', received: '到账金额', pickAcct: '选择账户',
     errTransferQty: '转出数量（含手续费）超过持有数量 {q}', errRecv: '请填写到账数量', transferValue: '按现价约 {v} · 当前持有 {q}', errTransferAcct: '请选择转出和转入账户', errTransferSame: '转出和转入不能是同一个账户', transferDone: '已转账',
     rankTotalTitle: '资产总盈亏', rankTotalSum: '累计合计', rankTotalHint: '价格类为浮动盈亏，现金为录入以来余额变化',
     rankDayTitle: '资产日盈亏', rankDaySum: '今日合计', rankDayHint: '含现金余额与手动更新', noChange: '无变化', colDay: '今日盈亏', sort_dayDesc: '今日涨最多', sort_dayAsc: '今日跌最多',
@@ -196,6 +198,8 @@ window.AV_I18N = {
   },
 
   en: {
+    kpiInvTotal: 'Investment Total P/L', costBasis: 'Cost', flipToTotal: 'Flip to total P/L', flipToYear: 'Flip to year P/L', pnl_gold: 'Gold', pnl_ocean: 'Ocean', pnl_sakura: 'Sakura', pnl_mono: 'Mono', pnl_custom: 'Custom', pnlCustom: 'Custom colors (picking one switches to Custom)', pnlUpC: 'Gain', pnlDownC: 'Loss',
+    fillMode: 'Entry mode', fillBal: 'Balance (amount)', fillQty: 'Quantity × price', fillBalHint: 'Enter an amount like cash; no P/L. Update it with the Balance button; changes show in asset day P/L. Good for USD / USDT balances on exchanges.', fillQtyHint: 'Value and P/L from quantity and price; use Update to change the value.',
     errSpendQty: 'The converted quantity exceeds the holding ({q}); turn off balance sync or pick another account', syncQtySub: 'Converted at {p}: {q}; income is added to cost basis; reverted on edit or delete', syncNoPrice: 'This asset has no price yet, so the amount can’t be converted to quantity', syncLots: 'lot(s)',
     cashTotal: 'Cash balance', cashNet: 'Net today', cashDayInc: 'Cash in today', cashDayExp: 'Cash out today', flipTip: 'Tap to flip', flipToFund: 'Flip to fund', flipToCash: 'Flip to cash', clsAlloc: '{c} allocation', backAlloc: 'Total allocation', allocDrillTip: 'Click a class to see its breakdown', ofTotal: '{p} of total', rankOnlyTotal: 'Ranking is available in total allocation', hideTotal: 'Hide / show total assets', nItems: '{n} items',
     goldSrc_goldapi: 'gold-api.com spot gold (quotes directly in CNY etc.)', goldSrc_paxg: 'Binance PAXG (USD, converted by FX)', goldSrcHint: 'Use code XAU. gold-api.com quotes in the asset’s currency (CNY + gram = CNY per gram). It is international spot and may differ slightly from SGE Au99.99. Falls back to PAXG if unavailable.',
@@ -222,11 +226,11 @@ window.AV_I18N = {
     act_create: 'Created', act_edit: 'Edited', act_delete: 'Deleted', act_lock: 'Locked', act_unlock: 'Unlocked', act_updVal: 'Value updated', act_updBal: 'Balance updated', act_balByTx: 'Balance changed',
     act_import: 'Imported data', act_demo: 'Loaded demo', act_cloudPull: 'Synced from cloud',
     lockYes: 'yes', lockNo: 'no',
-    fld_name: 'Name', fld_code: 'Code', fld_cls: 'Class', fld_warehouse: 'Custody', fld_ccy: 'Currency', fld_qty: 'Qty / balance', fld_cost: 'Avg cost', fld_price: 'Price', fld_unit: 'Unit', fld_source: 'Quote source', fld_note: 'Note', fld_locked: 'Locked', fld_value: 'Value',
+    fld_name: 'Name', fld_code: 'Code', fld_cls: 'Class', fld_warehouse: 'Custody', fld_ccy: 'Currency', fld_qty: 'Qty / balance', fld_cost: 'Avg cost', fld_price: 'Price', fld_unit: 'Unit', fld_source: 'Quote source', fld_note: 'Note', fld_locked: 'Locked', fld_balMode: 'Entry mode', fld_value: 'Value',
     fld_date: 'Date', fld_type: 'Type', fld_cat: 'Category', fld_amount: 'Amount', fld_accountId: 'Account', fld_toId: 'To account', fld_toAmount: 'Received', fld_fee: 'Fee',
     fee: 'Fee', feeHint: '{a} total will leave the From account; the fee counts as an expense', feeHint0: 'Deducted from the From account and counted as an expense',
     allocSortTip: 'Sort by share', allocSort_default: 'Default', allocSort_desc: 'High→Low', allocSort_asc: 'Low→High',
-    transfer: 'Transfer', cat_transfer: 'Transfer', transferFrom: 'From account', transferTo: 'To account', received: 'Received', pickAcct: 'Choose a cash / liability account',
+    transfer: 'Transfer', cat_transfer: 'Transfer', transferFrom: 'From account', transferTo: 'To account', received: 'Received', pickAcct: 'Choose an account',
     errTransferQty: 'Amount plus fee exceeds holding ({q})', errRecv: 'Enter the received amount', transferValue: '≈ {v} at current price · holding {q}', errTransferAcct: 'Choose both accounts', errTransferSame: 'From and To must be different accounts', transferDone: 'Transferred',
     rankTotalTitle: 'Asset Total P/L', rankTotalSum: 'Total', rankTotalHint: 'unrealized P/L; cash = balance change since added',
     rankDayTitle: 'Asset Day P/L', rankDaySum: 'Today total', rankDayHint: 'incl. cash balances & manual updates', noChange: 'no change', colDay: 'Today', sort_dayDesc: 'Top gainers today', sort_dayAsc: 'Top losers today',

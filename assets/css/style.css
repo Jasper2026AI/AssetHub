@@ -919,3 +919,17 @@ body.mobile .upd-bar{bottom:calc(84px + env(safe-area-inset-bottom))}
 .alloc-crumb b{color:color-mix(in srgb,var(--tc) 85%,#fff);font-weight:700}
 .donut-wrap.flip-in{animation:flipIn .32s cubic-bezier(.2,.9,.3,1.1);transform-origin:50% 50%}
 .seg button:disabled{opacity:.35;cursor:not-allowed}
+
+/* ===== 收支明细：账户所在仓库 ===== */
+.tbl td small.wh-sm,.wh-tag{display:inline-flex;align-items:center;gap:3px;color:var(--text-3);font-size:11.5px}
+.tbl td small.wh-sm{display:flex}
+.wh-sm svg.i,.wh-tag svg.i{width:11px;height:11px}
+.wh-tag{margin-left:4px}
+
+/* ===== 自定义盈亏颜色 ===== */
+.pnl-custom{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:10px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.04);font-size:12.5px;color:var(--text-2)}
+.pnl-custom.dim-off{opacity:.7}
+.pnl-custom label{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--text)}
+.pnl-custom input[type=color]{width:34px;height:26px;padding:0;border:1px solid rgba(255,255,255,.15);border-radius:8px;background:none;cursor:pointer}
+.pnl-custom input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+.pnl-custom input[type=color]::-webkit-color-swatch{border:0;border-radius:6px}

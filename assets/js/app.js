@@ -37,15 +37,22 @@
     classic: { up: '#22C55E', down: '#EF4444' },
     soft: { up: '#63E6A4', down: '#FF8A80' },
     neon: { up: '#00F5A0', down: '#FF2E63' },
-    mint: { up: '#34C3A6', down: '#F2546B' }
+    mint: { up: '#34C3A6', down: '#F2546B' },
+    gold: { up: '#FFD60A', down: '#BF5AF2' },
+    ocean: { up: '#0A84FF', down: '#FF9F0A' },
+    sakura: { up: '#5AC8FA', down: '#FF6B9D' },
+    mono: { up: '#F5F5F7', down: '#8E8E93' },
+    custom: { up: '#30D158', down: '#FF453A' }      // 自定义：实际颜色取设置里的 pnlUp / pnlDown
   };
+  /** 当前配色（自定义时读取设置里的两个颜色） */
+  const pnlPair = k => (k === 'custom' ? { up: S().pnlUp || '#30D158', down: S().pnlDown || '#FF453A' } : PNL_STYLES[k] || PNL_STYLES.ios);
   const PAGES = [
     { id: 'overview', icon: 'pie', k: 'navOverview' },
     { id: 'holdings', icon: 'trend', k: 'navHoldings' },
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -130,6 +137,13 @@
     a.cls = a.cls.filter(c => CLASSES.includes(c));
     if (!a.cls.length) a.cls = ['other'];
     if (a.warehouse == null) a.warehouse = '';
+    // v5.3：类别里含现金 / 负债的多类别资产改为“余额”填写；把原来的 数量 × 单价 折成余额，市值不变
+    const t2 = a.cls, hasB = t2.some(c => c === 'cash' || c === 'liability'), allB = t2.every(c => c === 'cash' || c === 'liability');
+    if (hasB && !allB && !a.balConv) {
+      const p = +a.price || 0;
+      if (p > 0 && p !== 1) a.qty = Math.round((+a.qty || 0) * p * 1e8) / 1e8;
+      a.price = 1; a.cost = 1; a.source = 'manual'; a.noQty = false; a.balConv = true;
+    }
     return a;
   }
   function migrate(d) {
@@ -174,7 +188,7 @@
   /* ---- 操作记录 ----
      每条资产 / 记账自带 log：[{ts, act, diffs:[[字段, 旧值, 新值]], extra}]
      DB.audit 为全局操作日志（含已删除的记录），最多保留 2000 条 */
-  const ASSET_FIELDS = ['name', 'code', 'cls', 'warehouse', 'ccy', 'qty', 'cost', 'price', 'unit', 'source', 'note', 'locked'];
+  const ASSET_FIELDS = ['name', 'code', 'cls', 'warehouse', 'ccy', 'qty', 'cost', 'price', 'unit', 'source', 'note', 'locked', 'balMode'];
   const TX_FIELDS = ['date', 'type', 'cat', 'amount', 'ccy', 'accountId', 'toId', 'toAmount', 'fee', 'note'];
   const same = (x, y) => JSON.stringify(x == null ? '' : x) === JSON.stringify(y == null ? '' : y);
   function diffOf(oldR, newR, fields) {
@@ -654,7 +668,9 @@
   const hasTag = (a, c) => c === 'all' || tagsOf(a).includes(c);
   /** 按类别筛选 / 统计时只认主类别（第一个选中的类别），多类别资产不会被重复计入 */
   const inCls = (a, c) => c === 'all' || primary(a) === c;
-  const isBalance = a => tagsOf(a).every(c => c === 'cash' || c === 'liability');   // 现金/负债：数量 = 余额
+  // 余额型资产（数量 = 金额，不计盈亏）：类别里有现金或负债（主或副），或手动维护时选了“按余额填写”
+  const isBalance = a => !!a.balMode || tagsOf(a).some(c => c === 'cash' || c === 'liability');
+  const hasBalTag = a => tagsOf(a).some(c => c === 'cash' || c === 'liability');
   const aCcy = a => (a.ccy || 'USD').toUpperCase();
   const aVal = a => (+a.qty || 0) * (isBalance(a) ? 1 : (+a.price || 0));
   const aCost = a => (isBalance(a) ? aVal(a) : (+a.qty || 0) * (+a.cost || 0));
@@ -826,7 +842,7 @@
   /* ============ 4. 渲染 ============ */
   function hexRGB(hex) { const n = parseInt(hex.slice(1), 16); return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`; }
   function applyTheme() {
-    const st = PNL_STYLES[S().pnlStyle] || PNL_STYLES.ios;
+    const st = pnlPair(S().pnlStyle);
     const up = S().pnlSwap ? st.down : st.up, down = S().pnlSwap ? st.up : st.down;
     const root = document.documentElement.style;
     root.setProperty('--up', up); root.setProperty('--down', down);
@@ -861,7 +877,7 @@
   }
   /** 一键切换盈亏配色：按钮里两个小圆点即当前的涨 / 跌颜色 */
   function pnlBtn() {
-    const st = PNL_STYLES[S().pnlStyle] || PNL_STYLES.ios;
+    const st = pnlPair(S().pnlStyle);
     const up = S().pnlSwap ? st.down : st.up, dn = S().pnlSwap ? st.up : st.down;
     return `<button class="icon-btn pnl-cycle" data-action="pnl-cycle" title="${t('pnlCycle')}: ${t('pnl_' + S().pnlStyle)}"><i style="background:${up}"></i><i style="background:${dn}"></i></button>`;
   }
@@ -930,10 +946,29 @@
     });
   }
   function kpiCard(o) {
-    return `<div class="kpi glass ${o.cls || ''}">
+    return `<div class="kpi glass ${o.cls || ''}" ${o.attr || ''}>
       <div class="lbl"><span class="ico">${ic(o.icon)}</span>${o.label}</div>
       <div class="val num">${o.val}</div>
-      <div class="sub">${o.sub || ''}</div>${o.spark || ''}</div>`;
+      <div class="sub">${o.sub || ''}</div>${o.spark || ''}${o.extra || ''}</div>`;
+  }
+  /** 投资总盈亏：所有非余额型资产的（市值 − 成本）合计 */
+  function investTotal() {
+    let v = 0, c = 0;
+    DB.assets.forEach(a => { if (isBalance(a)) return; v += aValD(a); c += aCostD(a); });
+    return { pnl: v - c, v, c, pct: c ? ((v - c) / Math.abs(c)) * 100 : 0 };
+  }
+  /** 第四张卡：投资年盈亏 ⇄ 投资总盈亏（底部图标翻转） */
+  function yearFlipHTML(anim) {
+    const C = colors(), col = v => (v > 1e-9 ? C.up : v < -1e-9 ? C.down : '#8E8E93'), face = UI.yearFace || 'year';
+    const btn = `<button class="flip-btn" data-action="flip-year" title="${face === 'year' ? t('flipToTotal') : t('flipToYear')}" aria-label="${face === 'year' ? t('flipToTotal') : t('flipToYear')}">${ic('swap')}</button>`;
+    if (face === 'year') {
+      const r = periodPnl('year');
+      return kpiCard({ cls: `${tone(r.pnl)} flip-card ${anim || ''}`, attr: 'id="year-flip"', icon: 'sparkle', label: t('kpiYear'), val: moneyHTML(r.pnl, { sign: true }),
+        sub: `${t('vsYear')} <b class="num">${pct(r.pct)}</b>`, spark: sparkSVG(netSeries('year'), col(r.pnl)), extra: btn });
+    }
+    const r = investTotal();
+    return kpiCard({ cls: `${tone(r.pnl)} flip-card ${anim || ''}`, attr: 'id="year-flip"', icon: 'pie', label: t('kpiInvTotal'), val: moneyHTML(r.pnl, { sign: true }),
+      sub: `${t('costBasis')} ${money(r.c)} · <b class="num">${pct(r.pct)}</b>`, extra: btn });
   }
   /** 第一行：所有页面固定显示 */
   function renderKPIs() {
@@ -950,7 +985,7 @@
         val: `<span class="net-val">${S().hideTotal ? MASK : moneyHTML(net)}</span>`, sub: `${t('quoteAt')}: ${timeStr(DB.lastQuote)} · ${t('nAssets', { n: DB.assets.length })}`, spark: sparkSVG(netSeries('net'), accent) }) +
       pnlCard(t('kpiDay'), 'trend', periodPnl('day'), t('vsDay'), 'day') +
       pnlCard(t('kpiMonth'), 'cal', periodPnl('month'), t('vsMonth'), 'month') +
-      pnlCard(t('kpiYear'), 'sparkle', periodPnl('year'), t('vsYear'), 'year');
+      yearFlipHTML();
   }
   /** 第二行：仅资产总览页 —— 每个类别一张卡，左“总盈亏”右“日盈亏” */
   function classKpisHTML() {
@@ -1346,6 +1381,9 @@
     const a = findAsset(id);
     return a ? a.name : t('deletedAccount');
   }
+  const acctWh = id => { const a = id && findAsset(id); return a && a.warehouse ? a.warehouse : ''; };
+  /** 关联账户所在仓库（转账显示 转出仓库 → 转入仓库） */
+  const txWh = x => (x.type === 'transfer' ? [acctWh(x.accountId), acctWh(x.toId)].some(Boolean) ? `${acctWh(x.accountId) || '—'} → ${acctWh(x.toId) || '—'}` : '' : acctWh(x.accountId));
   const txAcct = x => (x.type === 'transfer' ? `${acctName(x.accountId)} → ${acctName(x.toId)}` : acctName(x.accountId));
   const txSign = x => (x.type === 'income' ? 1 : x.type === 'transfer' ? 0 : -1);
   /** 金额文字：转账不带正负号、不着色 */
@@ -1360,7 +1398,7 @@
       ${batch ? `<label class="ck"><input type="checkbox" data-sel="tx" value="${x.id}" ${UI.led.sel.has(x.id) ? 'checked' : ''}><i></i></label>` : ''}
       <div class="tx-ico ${x.type}">${CAT_ICON[x.cat] || '•'}</div>
       <div class="tx-main"><div class="tx-title">${catName(x.cat)}${x.note ? `<span class="nt">${esc(x.note)}</span>` : ''}</div>
-        <div class="tx-meta">${x.date} · ${esc(txAcct(x))}</div></div>
+        <div class="tx-meta">${x.date} · ${esc(txAcct(x))}${txWh(x) ? ` <span class="wh-tag">${ic('db')}${esc(txWh(x))}</span>` : ''}</div></div>
       <div class="tx-amt num ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}
         ${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${qtyTxt(x.fee, x.fromUnit, x.ccy)}</small>` : ''}
         ${withOps && !batch ? `<div class="tx-ops">${histBtn('tx', x.id)}<button class="op edit" data-action="edit-tx" data-id="${x.id}">${ic('edit')}</button><button class="op del" data-action="del-tx" data-id="${x.id}">${ic('trash')}</button></div>` : ''}
@@ -1612,7 +1650,7 @@
             <td class="num">${x.date}<small>${t('wd' + ((new Date(x.date + 'T00:00:00').getDay() + 6) % 7))}</small></td>
             <td><span class="tag ${x.type}">${t(x.type)}</span></td>
             <td><span style="margin-right:6px">${CAT_ICON[x.cat] || ''}</span>${catName(x.cat)}</td>
-            <td class="muted">${esc(txAcct(x))}${x.applied ? `<small>${t('synced')}</small>` : ''}</td>
+            <td class="muted">${esc(txAcct(x))}${txWh(x) ? `<small class="wh-sm">${ic('db')}${esc(txWh(x))}</small>` : ''}${x.applied ? `<small>${t('synced')}</small>` : ''}</td>
             <td class="note" title="${esc(x.note)}">${esc(x.note) || '<span class="dim">—</span>'}</td>
             <td class="r num strong ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.type === 'transfer' && (x.toUnit || x.fromUnit || (x.toCcy && x.toCcy !== x.ccy)) ? `<small>${t('received')} ${qtyTxt(x.toAmount, x.toUnit, x.toCcy)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${qtyTxt(x.fee, x.fromUnit, x.ccy)}</small>` : ''}</td>
             <td class="c">${L.batch ? '' : `<div class="ops">${histBtn('tx', x.id)}<button class="op edit" data-action="edit-tx" data-id="${x.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-tx" data-id="${x.id}">${ic('trash')}${t('del')}</button></div>`}</td>
@@ -1640,7 +1678,7 @@
     const stockSrc = Api.STOCK_SOURCES[s.stockSrc] || Api.STOCK_SOURCES.finnhub;
     const r = DB.rates.rates;
     const pnlOpts = Object.keys(PNL_STYLES).map(k => {
-      const p = PNL_STYLES[k], up = s.pnlSwap ? p.down : p.up, dn = s.pnlSwap ? p.up : p.down;
+      const p = pnlPair(k), up = s.pnlSwap ? p.down : p.up, dn = s.pnlSwap ? p.up : p.down;
       return `<button class="pnl-opt ${s.pnlStyle === k ? 'on' : ''}" data-action="pnl-style" data-v="${k}">
         <div class="sw"><i style="background:${up}"></i><i style="background:${dn}"></i></div>
         <div class="nm">${t('pnl_' + k)}</div><div class="ex num"><span style="color:${up}">+8.52%</span> <span style="color:${dn}">-3.10%</span></div></button>`;
@@ -1730,7 +1768,10 @@
               <button class="${!isMobile() ? 'on' : ''}" data-action="layout" data-v="desktop" title="${t('layoutDesktop')}">${ic('monitor')}</button>
               <button class="${isMobile() ? 'on' : ''}" data-action="layout" data-v="mobile" title="${t('layoutMobile')}">${ic('phone')}</button></div></div>
           </div>
-          <div class="field"><label>${t('pnlStyle')}</label><div class="pnl-opts">${pnlOpts}</div></div>
+          <div class="field"><label>${t('pnlStyle')}</label><div class="pnl-opts">${pnlOpts}</div>
+            <div class="pnl-custom ${s.pnlStyle === 'custom' ? '' : 'dim-off'}"><span>${t('pnlCustom')}</span>
+              <label>${t('pnlUpC')}<input type="color" data-change="pnlUp" value="${esc(s.pnlUp || '#30D158')}"></label>
+              <label>${t('pnlDownC')}<input type="color" data-change="pnlDown" value="${esc(s.pnlDown || '#FF453A')}"></label></div></div>
           <div class="field"><label>${t('pnlDir')}</label><div class="seg seg-full">
             <button class="${!s.pnlSwap ? 'on' : ''}" data-action="pnl-swap" data-v="0">${t('dirGreenUp')}</button>
             <button class="${s.pnlSwap ? 'on' : ''}" data-action="pnl-swap" data-v="1">${t('dirRedUp')}</button></div></div>
@@ -1870,15 +1911,17 @@
   }
 
   /* ---- 记一笔 ---- */
+  /** 账户按“资产仓库”分组（未填写仓库的放最后） */
+  function whGroups() {
+    const g = {};
+    DB.assets.forEach(a => { const w = a.warehouse || ''; (g[w] = g[w] || []).push(a); });
+    const keys = Object.keys(g).filter(Boolean).sort((x, y) => g[y].length - g[x].length || x.localeCompare(y));
+    if (g['']) keys.push('');
+    return keys.map(k => ({ label: k || t('whNone'), list: g[k] }));
+  }
   function accountOptions(sel) {
-    let h = `<option value="">${t('noAccount')}</option>`;
-    const groups = {};
-    DB.assets.forEach(a => { (groups[primary(a)] = groups[primary(a)] || []).push(a); });
-    CLASSES.forEach(c => {
-      if (!groups[c]) return;
-      h += `<optgroup label="${t('cls_' + c)}">${groups[c].map(a => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}${a.code ? ' · ' + esc(a.code) : ''} (${aCcy(a)})</option>`).join('')}</optgroup>`;
-    });
-    return h;
+    return `<option value="">${t('noAccount')}</option>` + whGroups().map(gr =>
+      `<optgroup label="${esc(gr.label)}">${gr.list.map(a => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}${a.code ? ' · ' + esc(a.code) : ''} (${aCcy(a)})</option>`).join('')}</optgroup>`).join('');
   }
   function txCcyList(extra) {
     const set = new Set(DISPLAY_CCYS);
@@ -1888,19 +1931,13 @@
     return Array.from(set);
   }
   const validCcy = c => /^[A-Z]{3,5}$/.test(c) && !!rateOf(c);
-  /** 转账账户：所有资产按类别分组；现金类显示余额，其他显示持有数量 */
+  /** 转账账户：所有资产按仓库分组；现金类显示余额，其他显示持有数量 */
   function balOptions(sel) {
-    let h = `<option value="">${t('pickAcct')}</option>`;
-    const groups = {};
-    DB.assets.forEach(a => { (groups[primary(a)] = groups[primary(a)] || []).push(a); });
-    CLASSES.forEach(c => {
-      if (!groups[c]) return;
-      h += `<optgroup label="${t('cls_' + c)}">${groups[c].map(a => {
+    return `<option value="">${t('pickAcct')}</option>` + whGroups().map(gr =>
+      `<optgroup label="${esc(gr.label)}">${gr.list.map(a => {
         const u = qtyUnit(a), amt = hidden() ? MASK : u ? `${trim8(+a.qty || 0)} ${u}` : `${aCcy(a)} ${fmtNum(+a.qty || 0, 0, 2)}`;
         return `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)} (${esc(amt)})</option>`;
-      }).join('')}</optgroup>`;
-    });
-    return h;
+      }).join('')}</optgroup>`).join('');
   }
   function openTxModal(ex, presetType) {
     const st = ex ? Object.assign({}, ex, { sync: !!ex.applied })
@@ -2165,6 +2202,9 @@
       <div class="field hide-bal" id="af-src-wrap"><label>${t('quoteSource')}</label><div class="seg seg-full" id="af-src">
         <button type="button" data-v="online" class="${f.source === 'online' ? 'on' : ''}">${t('srcOnline')}</button>
         <button type="button" data-v="manual" class="${f.source !== 'online' ? 'on' : ''}">${t('srcManual')}</button></div></div>
+      <div class="field" id="af-mode-wrap"><label>${t('fillMode')}</label><div class="seg seg-full" id="af-mode">
+        <button type="button" data-v="bal">${t('fillBal')}</button>
+        <button type="button" data-v="qty">${t('fillQty')}</button></div><div class="hint" id="af-mode-hint"></div></div>
       <div class="field"><label>${t('noteOpt')}</label><input class="input" id="af-note" value="${esc(f.note || '')}" maxlength="80" placeholder="${t('notePh')}"></div>
       <div class="preview" id="af-preview"></div>`;
     openModal({
@@ -2172,13 +2212,15 @@
       body,
       footer: `${ex ? `<span class="foot-meta">${t('createdAt')} ${fullTime(ex.createdAt)}</span>` : ''}<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" id="af-save">${ic('check')}${t('save')}</button>`,
       onMount(m) {
-        const st = { cls: f.cls.slice(), ccy: isStd ? aCcy(f) : 'OTHER', source: f.source || 'online', touched: !!ex };
+        // balMode：手动维护的非现金资产可选“按余额填写”（新建默认按余额；已有资产保持原方式）
+        const st = { cls: f.cls.slice(), ccy: isStd ? aCcy(f) : 'OTHER', source: f.source || 'online', touched: !!ex, balMode: ex ? !!ex.balMode : true };
         const readForm = () => {
           const ccy = st.ccy === 'OTHER' ? ($('#af-ccy-other', m).value.trim().toUpperCase() || 'USD') : st.ccy;
           return {
             cls: st.cls.slice(), name: $('#af-name', m).value.trim(), code: $('#af-code', m).value.trim().toUpperCase(),
             ccy, qty: parseNum($('#af-qty', m).value), cost: parseNum($('#af-cost', m).value), price: parseNum($('#af-price', m).value),
-            unit: unitKey($('#af-unit', m).value), source: st.source, note: $('#af-note', m).value.trim(), warehouse: $('#af-wh', m).value.trim()
+            unit: unitKey($('#af-unit', m).value), source: st.source, note: $('#af-note', m).value.trim(), warehouse: $('#af-wh', m).value.trim(),
+            balMode: st.source === 'manual' && st.balMode && !st.cls.some(c => c === 'cash' || c === 'liability')
           };
         };
         const drawCls = () => {
@@ -2189,8 +2231,14 @@
           });
         };
         const sync = () => {
-          const a = readForm(), bal = isBalance(a);
+          const a = readForm(), bal = isBalance(a), tagBal = hasBalTag(a);
           $$('.hide-bal', m).forEach(el => { el.style.display = bal ? 'none' : ''; });
+          // 来源：含现金 / 负债类别时固定手动；按余额填写的其他资产仍可切回“在线”
+          $('#af-src-wrap', m).style.display = tagBal ? 'none' : '';
+          const showMode = !tagBal && st.source === 'manual';
+          $('#af-mode-wrap', m).style.display = showMode ? '' : 'none';
+          $$('#af-mode button', m).forEach(x => x.classList.toggle('on', x.dataset.v === (a.balMode ? 'bal' : 'qty')));
+          $('#af-mode-hint', m).textContent = a.balMode ? t('fillBalHint') : t('fillQtyHint');
           const showUnit = !bal;   // 所有非现金类资产都可以填计量单位（选填）
           $('#af-unit-wrap', m).style.display = showUnit ? '' : 'none';
           $('#af-cost-wrap', m).style.gridColumn = showUnit ? '1 / -1' : '';
@@ -2241,6 +2289,16 @@
         $('#af-src', m).addEventListener('click', e => {
           const b = e.target.closest('[data-v]'); if (!b) return;
           st.source = b.dataset.v; $$('#af-src button', m).forEach(x => x.classList.toggle('on', x === b));
+          sync();
+        });
+        // 切换填写方式时换算输入框：数量×单价 → 余额（市值），余额 → 1 份 × 单价
+        $('#af-mode', m).addEventListener('click', e => {
+          const b = e.target.closest('[data-v]'); if (!b) return;
+          const toBal = b.dataset.v === 'bal'; if (toBal === st.balMode) return;
+          const q = parseNum($('#af-qty', m).value), p = parseNum($('#af-price', m).value);
+          if (toBal) { const v = !isNaN(p) && p > 0 ? (isNaN(q) ? 1 : q) * p : q; $('#af-qty', m).value = isNaN(v) ? '' : trim8(round8(v)); }
+          else if (!isNaN(q)) { $('#af-price', m).value = trim8(q); $('#af-cost', m).value = $('#af-cost', m).value || trim8(q); $('#af-qty', m).value = ''; }
+          st.balMode = toBal; sync();
         });
         ['#af-qty', '#af-cost', '#af-price', '#af-ccy-other'].forEach(s => $(s, m).addEventListener('input', preview));
         $('#af-code', m).addEventListener('input', sync);
@@ -2272,7 +2330,8 @@
           else if (isNaN(a.qty)) { toast(t('errQty'), 'err'); $('#af-qty', m).focus(); return; }
           if (!validCcy(a.ccy)) { toast(t('errRate', { c: a.ccy }), 'err'); return; }
           if (bal) {
-            a.cost = 1; a.price = 1; a.source = 'manual'; a.code = '';
+            a.cost = 1; a.price = 1; a.source = 'manual'; a.noQty = false;
+            if (!a.balMode) a.code = '';
             if (a.cls.includes('liability') && a.qty > 0) a.qty = -a.qty;     // 负债自动记为负数
           } else {
             if (isNaN(a.cost)) a.cost = 0;
@@ -2330,6 +2389,7 @@
     if (f === 'cat') return esc(catName(v));
     if (f === 'type') return esc(t(v));
     if (f === 'source') return esc(v === 'online' ? t('srcOnline') : t('srcManual'));
+    if (f === 'balMode') return v ? t('fillBal') : t('fillQty');
     if (f === 'locked') return v ? t('lockYes') : t('lockNo');
     if (f === 'unit') return esc(t('unit_' + v));
     if (typeof v === 'number') return hidden() && ['qty', 'cost', 'price', 'amount', 'toAmount', 'fee'].includes(f) ? MASK : fmtNum(v, 0, 8);
@@ -2785,6 +2845,14 @@
     recover() { openRecovery(); },
     'alloc-drill'(el) { openAllocCls(el.dataset.v); },
     'alloc-back'() { closeAllocCls(); },
+    'flip-year'() {
+      const el = $('#year-flip'); if (!el) return;
+      el.classList.add('flip-out');
+      setTimeout(() => {
+        UI.yearFace = (UI.yearFace || 'year') === 'year' ? 'total' : 'year';
+        const cur = $('#year-flip'); if (cur) cur.outerHTML = yearFlipHTML('flip-in');
+      }, 180);
+    },
     'flip-fund'() {
       const el = $('#fund-flip'); if (!el) return;
       el.classList.add('flip-out');
@@ -2952,6 +3020,7 @@
       if (c === 'yStep') { S().yStep = el.value; save(); drawTrend(); return; }
       if (c === 'rankCls') { S().rankCls = el.value; save(); renderRank(); return; }
       if (c === 'holdSort') { UI.hold.sort = el.value; renderHoldBody(); return; }
+      if (c === 'pnlUp' || c === 'pnlDown') { S()[c] = el.value; S().pnlStyle = 'custom'; save(); applyTheme(); renderAll(); return; }
       if (c === 'holdWh') { UI.hold.wh = el.value; renderHoldBody(); $$('[data-change="holdWh"]').forEach(x => { x.value = el.value; }); return; }
       if (c === 'holdSrc') { UI.hold.src = el.value; renderHoldBody(); $$('[data-change="holdSrc"]').forEach(x => { x.value = el.value; }); return; }
       if (c === 'ledCat') { UI.led.cat = el.value; renderLedBody(); return; }
