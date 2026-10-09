@@ -949,3 +949,10 @@ body.mobile .upd-bar{bottom:calc(84px + env(safe-area-inset-bottom))}
   .sumgrid .sumbox{padding:9px 10px;border-radius:13px}
   .sumgrid .sumbox .v{font-size:13px}
 }
+
+/* ===== v5.5 PWA 安装卡 ===== */
+.pwa-tip{font-size:13px;line-height:1.6;color:var(--text-2,rgba(255,255,255,.7));padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+.pwa-state{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#30D158}
+.pwa-state svg{width:18px;height:18px}
+/* 安装后以独立窗口运行时，避开 iPhone 刘海 / 状态栏 */
+@media (display-mode: standalone){ body{padding-top:env(safe-area-inset-top)} }

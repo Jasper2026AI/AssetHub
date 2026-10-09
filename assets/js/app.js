@@ -52,7 +52,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1672,6 +1672,21 @@
         ${all.length > n ? `<button class="btn btn-glass sm" data-action="log-more" style="margin-top:12px">${t('loadMore')} (${all.length - n})</button>` : ''}` : `<div class="empty sm"><p>${t('noLog')}</p></div>`}
     </div>`;
   }
+  /* ---- PWA：安装到桌面 / 主屏幕 ---- */
+  const PWA = { prompt: null };
+  const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function pwaCardHTML() {
+    let body;
+    if (isStandalone()) body = `<div class="pwa-state ok">${ic('check')}${t('pwaInstalled')}</div>`;
+    else if (PWA.prompt) body = `<button class="btn btn-accent" data-action="pwa-install">${ic('download')}${t('pwaInstallBtn')}</button>`;
+    else if (isIOS()) body = `<div class="pwa-tip">${t('pwaIOS')}</div>`;
+    else body = `<div class="pwa-tip">${t('pwaManual')}</div>`;
+    return `<div class="card glass">
+          <div class="card-head"><div class="card-title"><span class="ico">${ic('phone')}</span>${t('pwaT')}</div></div>
+          <p class="set-desc">${t('pwaSub')}</p>${body}</div>`;
+  }
+
   function renderSettings() {
     const s = S();
     const size = (new Blob([JSON.stringify(DB)]).size / 1024).toFixed(1);
@@ -1783,6 +1798,7 @@
           </div></div>
           <div class="field" style="margin-bottom:0"><label>${t('subtitle')}</label><input class="input" data-meta="subtitle" value="${esc(DB.meta.subtitle)}" placeholder="${t('subtitlePh')}" maxlength="80"></div>
         </div>
+        ${pwaCardHTML()}
       </div>
     </div>`;
   }
@@ -2899,6 +2915,12 @@
       setupAutoRefresh(); renderAll();
     },
     'pick-icon'() { $('#file-icon').click(); },
+    async 'pwa-install'() {
+      if (!PWA.prompt) return;
+      PWA.prompt.prompt();
+      try { const r = await PWA.prompt.userChoice; if (r && r.outcome === 'accepted') toast(t('pwaDone')); } catch (e) {}
+      PWA.prompt = null; if (UI.page === 'settings') renderPage();
+    },
     'remove-icon'() { DB.meta.icon = ''; commit(); renderAll(); },
     'pnl-cycle'() {
       const ks = Object.keys(PNL_STYLES), i = ks.indexOf(S().pnlStyle);
@@ -3092,11 +3114,17 @@
         const bar = document.createElement('div');
         bar.id = 'upd-bar'; bar.className = 'upd-bar';
         bar.innerHTML = `<span>${t('newVer', { v: esc(v) })}</span><button class="btn btn-accent sm">${ic('refresh')}${t('newVerBtn')}</button>`;
-        bar.querySelector('button').addEventListener('click', () => { location.replace(location.pathname + '?v=' + encodeURIComponent(v) + location.hash); });
+        bar.querySelector('button').addEventListener('click', async () => { try { const rg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (rg) await rg.update(); } catch (e) {} location.replace(location.pathname + '?v=' + encodeURIComponent(v) + location.hash); });
         document.body.appendChild(bar);
       }
     } catch (e) { /* 离线或本地文件打开时忽略 */ }
   }
+  // PWA：注册 Service Worker（仅 https / localhost），并接住浏览器的安装提示
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  }
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); PWA.prompt = e; if (UI.page === 'settings') renderPage(); });
+  window.addEventListener('appinstalled', () => { PWA.prompt = null; toast(t('pwaDone')); if (UI.page === 'settings') renderPage(); });
   setTimeout(checkUpdate, 1500);
   setInterval(checkUpdate, 10 * 60000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });

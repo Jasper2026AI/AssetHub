@@ -186,6 +186,7 @@ window.AV_I18N = {
     autoRefresh: '自动刷新行情', off: '关闭', everyMin: '每 {n} 分钟',
     testApi: '测试连接', testing: '测试中…',
 
+    pwaT: '安装为 App', pwaSub: '把 AssetHub 安装到手机主屏幕或电脑桌面：全屏打开、有独立图标，断网时也能打开查看上次的数据（行情和同步仍需联网）。', pwaInstallBtn: '安装到本设备', pwaInstalled: '已作为 App 运行', pwaDone: '已安装 AssetHub', pwaIOS: 'iPhone / iPad：用 Safari 打开本页 → 点底部「分享」按钮 → 选「添加到主屏幕」。', pwaManual: '浏览器地址栏右侧出现「安装」图标时点它即可；安卓 Chrome 也可在右上角菜单选「安装应用 / 添加到主屏幕」。',
     setLookT: '外观与显示', pnlStyle: '盈亏配色', pnlCycle: '盈亏配色', pnlDir: '涨跌颜色方向', dirGreenUp: '绿涨红跌（国际）', dirRedUp: '红涨绿跌（中国）',
     pnl_ios: 'iOS 系统', pnl_classic: '经典', pnl_soft: '柔和', pnl_neon: '霓虹', pnl_mint: '薄荷',
     customIcon: '自定义图标', uploadIcon: '上传图标', removeIcon: '恢复默认',
@@ -367,6 +368,7 @@ window.AV_I18N = {
     autoRefresh: 'Auto refresh', off: 'Off', everyMin: 'Every {n} min',
     testApi: 'Test connection', testing: 'Testing…',
 
+    pwaT: 'Install as app', pwaSub: 'Install AssetHub on your home screen or desktop: opens full-screen with its own icon, and still opens offline with your last data (quotes and sync need a connection).', pwaInstallBtn: 'Install on this device', pwaInstalled: 'Running as an app', pwaDone: 'AssetHub installed', pwaIOS: 'iPhone / iPad: open this page in Safari → tap Share → Add to Home Screen.', pwaManual: 'Click the Install icon at the right of the address bar when it appears; on Android Chrome use the menu → Install app / Add to Home screen.',
     setLookT: 'Appearance', pnlStyle: 'P/L colors', pnlCycle: 'P/L colors', pnlDir: 'Up / down direction', dirGreenUp: 'Green up, red down', dirRedUp: 'Red up, green down',
     pnl_ios: 'iOS', pnl_classic: 'Classic', pnl_soft: 'Soft', pnl_neon: 'Neon', pnl_mint: 'Mint',
     customIcon: 'Custom icon', uploadIcon: 'Upload icon', removeIcon: 'Reset',
