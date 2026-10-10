@@ -52,7 +52,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -245,7 +245,7 @@
     // 同一天两边都有记录：各资产日盈亏明细取更晚记录的那一份（例如那天只在手机上打开过到很晚）
     if (sameBook && c.snaps) Object.keys(c.snaps).forEach(k => {
       const cs = c.snaps[k], ls = loc[k];
-      if (ls && cs && cs.d && (!ls.d || (cs.dt || 0) > (ls.dt || 0))) DB.snaps[k] = Object.assign({}, ls, { d: cs.d, dt: cs.dt });
+      if (ls && cs && cs.d && (!ls.d || (cs.dt || 0) > (ls.dt || 0))) DB.snaps[k] = Object.assign({}, ls, { d: cs.d, tp: cs.tp || ls.tp, dt: cs.dt });
     });
     const seen = new Set(), merged = [];
     (sameBook ? DB.audit || [] : []).concat(obj.audit || []).sort((x, y) => x.ts - y.ts).forEach(e => { const k = e.ts + e.kind + e.id + e.act; if (!seen.has(k)) { seen.add(k); merged.push(e); } });
@@ -720,8 +720,12 @@
     DB.assets.forEach(a => {
       const x = dayChange(a, keys);
       if (Math.abs(x.ch) < 1e-9 && !isBalance(a) && !(+a.qty)) return;
-      s.d[a.id] = [Math.round(conv(x.ch, S().ccy, 'USD') * 100) / 100, Math.round((x.pct || 0) * 100) / 100];
+      const r2 = v => Math.round(conv(v, S().ccy, 'USD') * 100) / 100;
+      s.d[a.id] = [r2(x.ch), Math.round((x.pct || 0) * 100) / 100, r2(x.pct ? x.ch / (x.pct / 100) : 0)];
     });
+    // tp：当天的投资总盈亏 [盈亏, 成本]（USD），用于按日期查看投资总盈亏
+    const it = investTotal();
+    s.tp = [Math.round(conv(it.pnl, S().ccy, 'USD') * 100) / 100, Math.round(conv(it.c, S().ccy, 'USD') * 100) / 100];
     s.dt = Date.now();
   }
   function pruneSnaps() {
@@ -740,7 +744,7 @@
       const sn = DB.snaps[k];
       if (k < cut && !monthEnd) { delete sn.p; delete sn.b; }
       if (k < todayKey()) { delete sn.po; delete sn.bo; }
-      if (k < dCut) delete sn.d;
+      if (k < dCut) { delete sn.d; delete sn.tp; }
     });
   }
   const snapKeys = () => Object.keys(DB.snaps).sort();
@@ -969,6 +973,26 @@
       <div class="val num">${o.val}</div>
       <div class="sub">${o.sub || ''}</div>${o.spark || ''}${o.extra || ''}</div>`;
   }
+  /* ---- 指标卡：日历按钮 / 历史日期标签 ---- */
+  const kd = k => ((UI.kd || {})[k] || '');
+  const calBtn = k => `<button class="eye-mini cal-mini ${kd(k) ? 'on' : ''}" data-action="kpi-cal" data-k="${k}" title="${t('calTip')}" aria-label="${t('calTip')}">${ic('cal')}</button>`;
+  function kdLabel(v) {
+    if (v.length === 4) return zh() ? v + '年' : v;
+    if (v.length === 7) return zh() ? `${v.slice(0, 4)}年${+v.slice(5)}月` : `${t('mon' + (+v.slice(5) - 1))} ${v.slice(0, 4)}`;
+    return `${v.slice(5).replace('-', '/')} ${t('wd' + ((new Date(v + 'T00:00:00').getDay() + 6) % 7))}`;
+  }
+  const kdChip = k => `<button class="day-chip sm" data-action="kpi-live" data-k="${k}" title="${t('rankCalToday')}">${kdLabel(kd(k))}${ic('x')}</button>`;
+  /** 取历史值；那天没数据就回到实时 */
+  function kdHist(k, fn) {
+    const v = kd(k); if (!v) return null;
+    const r = fn(v); if (!r) { UI.kd[k] = ''; return null; }
+    return r;
+  }
+  const kdSub = (k, r) => `${kdChip(k)} <b class="num ${upDown(r.pnl)}">${pct(r.pct)}</b>${r.est ? ` <span class="est-tag" title="${t('calEstTip')}">${t('calEst')}</span>` : ''}`;
+  function refreshKpis() {
+    renderKPIs();
+    const el = $('.kpis-dual'); if (el) el.outerHTML = classKpisHTML();
+  }
   /** 投资总盈亏：所有非余额型资产的（市值 − 成本）合计 */
   function investTotal() {
     let v = 0, c = 0;
@@ -980,29 +1004,32 @@
     const C = colors(), col = v => (v > 1e-9 ? C.up : v < -1e-9 ? C.down : '#8E8E93'), face = UI.yearFace || 'year';
     const btn = `<button class="flip-btn" data-action="flip-year" title="${face === 'year' ? t('flipToTotal') : t('flipToYear')}" aria-label="${face === 'year' ? t('flipToTotal') : t('flipToYear')}">${ic('swap')}</button>`;
     if (face === 'year') {
-      const r = periodPnl('year');
-      return kpiCard({ cls: `${tone(r.pnl)} flip-card ${anim || ''}`, attr: 'id="year-flip"', icon: 'sparkle', label: t('kpiYear'), val: moneyHTML(r.pnl, { sign: true }),
-        sub: `${t('vsYear')} <b class="num">${pct(r.pct)}</b>`, spark: sparkSVG(netSeries('year'), col(r.pnl)), extra: btn });
+      const h = kdHist('year', invYear), r = h || periodPnl('year');
+      return kpiCard({ cls: `${tone(r.pnl)} flip-card ${anim || ''}`, attr: 'id="year-flip"', icon: 'sparkle', label: t('kpiYear') + calBtn('year'), val: moneyHTML(r.pnl, { sign: true }),
+        sub: h ? kdSub('year', h) : `${t('vsYear')} <b class="num">${pct(r.pct)}</b>`, spark: sparkSVG(netSeries('year'), col(r.pnl)), extra: btn });
     }
-    const r = investTotal();
-    return kpiCard({ cls: `${tone(r.pnl)} flip-card ${anim || ''}`, attr: 'id="year-flip"', icon: 'pie', label: t('kpiInvTotal'), val: moneyHTML(r.pnl, { sign: true }),
-      sub: `${t('costBasis')} ${money(r.c)} · <b class="num">${pct(r.pct)}</b>`, extra: btn });
+    const h = kdHist('total', invTotalAt), r = h || investTotal();
+    return kpiCard({ cls: `${tone(r.pnl)} flip-card ${anim || ''}`, attr: 'id="year-flip"', icon: 'pie', label: t('kpiInvTotal') + calBtn('total'), val: moneyHTML(r.pnl, { sign: true }),
+      sub: h ? kdSub('total', h) : `${t('costBasis')} ${money(r.c)} · <b class="num">${pct(r.pct)}</b>`, extra: btn });
   }
   /** 第一行：所有页面固定显示 */
   function renderKPIs() {
     const net = netD(), C = colors(), accent = '#FF9000';
     const col = v => (v > 1e-9 ? C.up : v < -1e-9 ? C.down : '#8E8E93');
-    const pnlCard = (label, icon, r, ref, kind) => kpiCard({
-      cls: tone(r.pnl), icon, label,
-      val: moneyHTML(r.pnl, { sign: true }),
-      sub: `${ref} <b class="num">${pct(r.pct)}</b>`,
-      spark: sparkSVG(netSeries(kind), col(r.pnl))
-    });
+    const pnlCard = (label, icon, live, ref, kind, fn) => {
+      const h = kdHist(kind, fn), r = h || live;
+      return kpiCard({
+        cls: tone(r.pnl), icon, label: label + calBtn(kind),
+        val: moneyHTML(r.pnl, { sign: true }),
+        sub: h ? kdSub(kind, h) : `${ref} <b class="num">${pct(r.pct)}</b>`,
+        spark: sparkSVG(netSeries(kind), col(r.pnl))
+      });
+    };
     $('#kpis').innerHTML =
       kpiCard({ cls: 'hero', icon: 'wallet', label: `${t('kpiNet')}<button class="eye-mini" data-action="toggle-total" title="${t('hideTotal')}">${ic(S().hideTotal ? 'eyeoff' : 'eye')}</button>`,
         val: `<span class="net-val">${S().hideTotal ? MASK : moneyHTML(net)}</span>`, sub: `${t('quoteAt')}: ${timeStr(DB.lastQuote)} · ${t('nAssets', { n: DB.assets.length })}`, spark: sparkSVG(netSeries('net'), accent) }) +
-      pnlCard(t('kpiDay'), 'trend', periodPnl('day'), t('vsDay'), 'day') +
-      pnlCard(t('kpiMonth'), 'cal', periodPnl('month'), t('vsMonth'), 'month') +
+      pnlCard(t('kpiDay'), 'trend', periodPnl('day'), t('vsDay'), 'day', d => invDay(d)) +
+      pnlCard(t('kpiMonth'), 'cal', periodPnl('month'), t('vsMonth'), 'month', invMonth) +
       yearFlipHTML();
   }
   /** 第二行：仅资产总览页 —— 每个类别一张卡，左“总盈亏”右“日盈亏” */
@@ -1013,15 +1040,16 @@
   function classCardHTML(c, extra) {
     const icon = { stock: 'trend', crypto: 'bolt', gold: 'sparkle', fund: 'pie' }, C = colors();
     const col = v => (v > 1e-9 ? C.up : v < -1e-9 ? C.down : '#8E8E93');
-    const tot = classTotal(c), day = periodPnl('day', DB.assets.filter(a => primary(a) === c)), name = t('cls_' + c);
+    const tot = classTotal(c), name = t('cls_' + c), ck = 'cls_' + c;
+    const h = kdHist(ck, d => invDay(d, c)), day = h || periodPnl('day', DB.assets.filter(a => primary(a) === c));
     return `<div class="kpi glass dual ${tone(tot.pnl)} ${extra ? extra.cls : ''}" ${extra ? extra.attr : ''}>
         <div class="dual-grid">
           <div><div class="lbl"><span class="ico">${ic(icon[c])}</span>${t('kpiClsTotal', { c: name })}</div>
             <div class="val num ${upDown(tot.pnl)}">${moneyHTML(tot.pnl, { sign: true })}</div>
             <div class="sub">${t('mktValue')} ${money(tot.v)} · <b class="num ${upDown(tot.pnl)}">${pct(tot.pct)}</b></div></div>
-          <div class="dual-r"><div class="lbl">${t('kpiClsDay', { c: name })}</div>
+          <div class="dual-r"><div class="lbl">${t('kpiClsDay', { c: name })}${calBtn(ck)}</div>
             <div class="val num ${upDown(day.pnl)}">${moneyHTML(day.pnl, { sign: true })}</div>
-            <div class="sub">${t('vsDay')} <b class="num ${upDown(day.pnl)}">${pct(day.pct)}</b></div></div>
+            <div class="sub">${h ? kdSub(ck, h) : `${t('vsDay')} <b class="num ${upDown(day.pnl)}">${pct(day.pct)}</b>`}</div></div>
         </div>${sparkSVG(classSeries(c), col(tot.pnl))}${extra ? extra.btn : ''}</div>`;
   }
   /** 现金：总余额（主类别为现金的资产市值合计）+ 今日记账收入 / 支出 */
@@ -1233,7 +1261,11 @@
     if (!sn) return null;
     if (sn.d) {
       const rows = [];
-      DB.assets.forEach(a => { const v = sn.d[a.id]; if (v) rows.push({ a, ch: conv(v[0], 'USD'), pct: v[1] }); });
+      DB.assets.forEach(a => {
+        const v = sn.d[a.id]; if (!v) return;
+        const ch = conv(v[0], 'USD');
+        rows.push({ a, ch, pct: v[1], base: v[2] != null ? conv(v[2], 'USD') : v[1] ? ch / (v[1] / 100) : 0 });
+      });
       return { rows, est: false };
     }
     const keys = snapKeys(), i = keys.indexOf(k);
@@ -1246,9 +1278,10 @@
       const bal = isBalance(a), f = bal ? 'b' : 'p', cur = sn[f] && sn[f][a.id], ref = prev[f] && prev[f][a.id];
       if (cur == null || ref == null) return;
       const ccy = aCcy(a);
-      if (bal) { const ch = conv(cur - ref, ccy); rows.push({ a, ch, pct: ref ? (ch / Math.abs(conv(ref, ccy))) * 100 : 0 }); return; }
+      if (bal) { const ch = conv(cur - ref, ccy), base = conv(ref, ccy); rows.push({ a, ch, base, pct: ref ? (ch / Math.abs(base)) * 100 : 0 }); return; }
+      if ((a.createdAt || 0) > new Date(k + 'T23:59:59').getTime()) return;   // 那天之后才录入的资产不算
       const q = +a.qty || 0, ch = conv(q * (cur - ref), ccy), base = conv(q * ref, ccy);
-      rows.push({ a, ch, pct: base ? (ch / Math.abs(base)) * 100 : 0 });
+      rows.push({ a, ch, base, pct: base ? (ch / Math.abs(base)) * 100 : 0 });
     });
     return { rows, est: true };
   }
@@ -1260,10 +1293,62 @@
     return sg + fmtNum(a, 0, a >= 100 ? 0 : 2);
   };
   const daySum = k => { const h = histDay(k); return h ? h.rows.reduce((s2, x) => s2 + x.ch, 0) : null; };
-  /** 日历：每天显示当天资产日盈亏合计，点某天查看那天的排行 */
-  function openRankCal(month) {
+
+  /* ---- 指标卡按日期查看 ----
+     投资类 = 非现金 / 负债资产；类别卡只算主类别。今天用实时数据，历史用 histDay（记录或估算） */
+  const isInv = a => !isBalance(a);
+  function invDay(k, c) {
+    const pick = a => isInv(a) && (!c || primary(a) === c);
+    if (k === todayKey()) { const r = periodPnl('day', DB.assets.filter(pick)); return { pnl: r.pnl, pct: r.pct, est: false }; }
+    const h = histDay(k); if (!h) return null;
+    let pnl = 0, base = 0;
+    h.rows.forEach(x => { if (pick(x.a)) { pnl += x.ch; base += x.base || 0; } });
+    return { pnl, pct: base ? (pnl / Math.abs(base)) * 100 : 0, est: h.est };
+  }
+  /** 某个月 / 某一年的投资盈亏：期内每天都有记录就把每日记录相加；否则按期初、期末快照价 × 当前数量估算（与实时卡片同一口径） */
+  function invPeriod(start, end) {
+    const tk = todayKey(), keys = snapKeys(), inP = keys.filter(k => k >= start && k <= end && k < tk);
+    if (end >= tk) return null;
+    const endTs = new Date(end + 'T23:59:59').getTime();
+    let pnl = 0, base = 0, n = 0;
+    DB.assets.forEach(a => {
+      if (!isInv(a) || (a.createdAt || 0) > endTs) return;
+      let pe = null;
+      for (let i = inP.length - 1; i >= 0; i--) { const pm = DB.snaps[inP[i]].p; if (pm && pm[a.id] != null) { pe = pm[a.id]; break; } }
+      if (pe == null) return;
+      const ref = refPrice(a, start, keys), q = +a.qty || 0;
+      pnl += conv(q * (pe - ref), aCcy(a)); base += conv(q * ref, aCcy(a)); n++;
+    });
+    const rec = inP.length && inP.every(k => DB.snaps[k].d);
+    if (rec) {
+      let s2 = 0; inP.forEach(k => DB.assets.forEach(a => { const v = DB.snaps[k].d[a.id]; if (v && isInv(a)) s2 += conv(v[0], 'USD'); }));
+      return { pnl: s2, pct: base ? (s2 / Math.abs(base)) * 100 : 0, est: false };
+    }
+    if (!n) return null;
+    return { pnl, pct: base ? (pnl / Math.abs(base)) * 100 : 0, est: true };
+  }
+  const monthEnd = m => { const [y, mo] = m.split('-').map(Number); return `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`; };
+  const invMonth = m => (m === todayKey().slice(0, 7) ? Object.assign(periodPnl('month'), { est: false }) : invPeriod(m + '-01', monthEnd(m)));
+  const invYear = y => (y === todayKey().slice(0, 4) ? Object.assign(periodPnl('year'), { est: false }) : invPeriod(y + '-01-01', y + '-12-31'));
+  /** 某天收盘时的投资总盈亏：有记录用记录；否则 = 当前数量 × 那天的单价 − 当前成本（估算） */
+  function invTotalAt(k) {
+    if (k === todayKey()) { const r = investTotal(); return Object.assign(r, { est: false }); }
+    const sn = DB.snaps[k]; if (!sn) return null;
+    if (sn.tp) { const pnl = conv(sn.tp[0], 'USD'), c = conv(sn.tp[1], 'USD'); return { pnl, c, pct: c ? (pnl / Math.abs(c)) * 100 : 0, est: false }; }
+    if (!sn.p) return null;
+    const endTs = new Date(k + 'T23:59:59').getTime();
+    let v = 0, c = 0, n = 0;
+    DB.assets.forEach(a => {
+      if (!isInv(a) || (a.createdAt || 0) > endTs || sn.p[a.id] == null) return;
+      const q = +a.qty || 0; v += conv(q * sn.p[a.id], aCcy(a)); c += conv(q * (+a.cost || 0), aCcy(a)); n++;
+    });
+    if (!n) return null;
+    return { pnl: v - c, c, pct: c ? ((v - c) / Math.abs(c)) * 100 : 0, est: true };
+  }
+  /** 日历弹窗（通用）：o.val(k) 返回当天要显示的数值（null = 没有数据，不能点），o.onPick(k) 选中某天 */
+  function openDayCal(o, month) {
     const tk = todayKey(), keys = snapKeys(), first = keys[0] || tk;
-    const cur = month || (UI.rankDay || tk).slice(0, 7);
+    const cur = month || (o.sel || tk).slice(0, 7);
     const [y, mo] = cur.split('-').map(Number);
     const startDow = (new Date(y, mo - 1, 1).getDay() + 6) % 7, days = new Date(y, mo, 0).getDate();
     const shift = n => { const d = new Date(y, mo - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
@@ -1273,34 +1358,102 @@
     let mSum = 0, mDays = 0;
     for (let d = 1; d <= days; d++) {
       const k = `${cur}-${String(d).padStart(2, '0')}`;
-      const v = k === tk ? DB.assets.reduce((s2, a) => s2 + dayChange(a, keys).ch, 0) : k > tk ? null : daySum(k);
-      const has = v != null, sel = (UI.rankDay || tk) === k;
+      const v = k > tk ? null : o.val(k);
+      const has = v != null, sel = (o.sel || tk) === k;
       if (has) { mSum += v; mDays++; }
       cells.push(`<button type="button" class="cal-cell ${has ? upDown(v) || 'flat' : 'none'} ${sel ? 'sel' : ''} ${k === tk ? 'today' : ''}" ${has ? `data-day="${k}"` : 'disabled'}>
         <b>${d}</b><small class="num">${has ? (hidden() ? '•••' : calNum(v)) : ''}</small></button>`);
     }
     const dows = (S().lang === 'en' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['一', '二', '三', '四', '五', '六', '日']).map(x => `<div class="cal-dow">${x}</div>`).join('');
     const title = S().lang === 'en' ? new Date(y, mo - 1, 1).toLocaleDateString('en-US', { year: 'numeric', month: 'long' }) : `${y} 年 ${mo} 月`;
+    const subTxt = o.monthSum === false ? '' : mDays ? t('rankCalMonth', { v: money(mSum, { sign: true }) }) : t('rankCalNone');
     openModal({
-      title: t('rankCalT'),
+      title: o.title,
       body: `<div class="cal-nav"><button class="icon-btn sm" data-cal-m="${shift(-1)}" ${canPrev ? '' : 'disabled'}>${ic('chev-l')}</button>
-          <div class="cal-title"><b>${title}</b><small class="num ${upDown(mDays ? mSum : 0)}">${mDays ? t('rankCalMonth', { v: money(mSum, { sign: true }) }) : t('rankCalNone')}</small></div>
+          <div class="cal-title"><b>${title}</b>${subTxt ? `<small class="num ${o.monthSum === false ? '' : upDown(mDays ? mSum : 0)}">${subTxt}</small>` : ''}</div>
           <button class="icon-btn sm" data-cal-m="${shift(1)}" ${canNext ? '' : 'disabled'}>${ic('chev-r')}</button></div>
         <div class="cal-grid">${dows}${cells.join('')}</div>
-        <p class="hint" style="margin-top:12px">${t('rankCalHint')}</p>`,
+        <p class="hint" style="margin-top:12px">${o.hint || ''}</p>`,
       footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" data-cal-today>${ic('clock')}${t('rankCalToday')}</button>`,
       onMount(m) {
         m.addEventListener('click', e => {
-          const nb = e.target.closest('[data-cal-m]'); if (nb && !nb.disabled) { openRankCal(nb.dataset.calM); return; }
+          const nb = e.target.closest('[data-cal-m]'); if (nb && !nb.disabled) { openDayCal(o, nb.dataset.calM); return; }
           const db = e.target.closest('[data-day]');
-          if (db || e.target.closest('[data-cal-today]')) {
-            const k = db ? db.dataset.day : tk;
-            UI.rankDay = k === tk ? '' : k;
-            closeModal(); renderMoves();
-          }
+          if (db || e.target.closest('[data-cal-today]')) { closeModal(); o.onPick(db ? db.dataset.day : tk); }
         });
       }
     });
+  }
+  /** 月份选择：o.val('YYYY-MM') */
+  function openMonthCal(o, year) {
+    const tk = todayKey(), first = (snapKeys()[0] || tk).slice(0, 4), cy = +tk.slice(0, 4);
+    const yr = year || +(o.sel || tk).slice(0, 4);
+    const cells = [];
+    let ySum = 0, yN = 0;
+    for (let i = 1; i <= 12; i++) {
+      const m = `${yr}-${String(i).padStart(2, '0')}`;
+      const v = m > tk.slice(0, 7) || m < (snapKeys()[0] || tk).slice(0, 7) ? null : o.val(m);
+      const has = v != null;
+      if (has) { ySum += v.pnl; yN++; }
+      cells.push(`<button type="button" class="cal-cell mcell ${has ? upDown(v.pnl) || 'flat' : 'none'} ${(o.sel || tk.slice(0, 7)) === m ? 'sel' : ''} ${m === tk.slice(0, 7) ? 'today' : ''}" ${has ? `data-m="${m}"` : 'disabled'}>
+        <b>${S().lang === 'en' ? t('mon' + (i - 1)) : i + '月'}</b><small class="num">${has ? (hidden() ? '•••' : calNum(v.pnl)) : ''}</small>${has && v.est ? '<em>≈</em>' : ''}</button>`);
+    }
+    openModal({
+      title: o.title,
+      body: `<div class="cal-nav"><button class="icon-btn sm" data-cal-y="${yr - 1}" ${yr - 1 >= +first ? '' : 'disabled'}>${ic('chev-l')}</button>
+          <div class="cal-title"><b>${yr}${S().lang === 'en' ? '' : ' 年'}</b><small class="num ${upDown(yN ? ySum : 0)}">${yN ? t('calYearSum', { v: money(ySum, { sign: true }) }) : t('rankCalNone')}</small></div>
+          <button class="icon-btn sm" data-cal-y="${yr + 1}" ${yr + 1 <= cy ? '' : 'disabled'}>${ic('chev-r')}</button></div>
+        <div class="cal-grid m4">${cells.join('')}</div>
+        <p class="hint" style="margin-top:12px">${o.hint || ''}</p>`,
+      footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" data-cal-today>${ic('clock')}${t('calThisMonth')}</button>`,
+      onMount(m) {
+        m.addEventListener('click', e => {
+          const nb = e.target.closest('[data-cal-y]'); if (nb && !nb.disabled) { openMonthCal(o, +nb.dataset.calY); return; }
+          const db = e.target.closest('[data-m]');
+          if (db || e.target.closest('[data-cal-today]')) { closeModal(); o.onPick(db ? db.dataset.m : tk.slice(0, 7)); }
+        });
+      }
+    });
+  }
+  /** 年份选择：o.val('YYYY') */
+  function openYearCal(o) {
+    const tk = todayKey(), first = +(snapKeys()[0] || tk).slice(0, 4), cy = +tk.slice(0, 4), cells = [];
+    for (let yr = cy; yr >= first; yr--) {
+      const v = o.val(String(yr)), has = v != null;
+      cells.push(`<button type="button" class="cal-cell ycell ${has ? upDown(v.pnl) || 'flat' : 'none'} ${(o.sel || String(cy)) === String(yr) ? 'sel' : ''} ${yr === cy ? 'today' : ''}" ${has ? `data-y="${yr}"` : 'disabled'}>
+        <b>${yr}</b><small class="num">${has ? (hidden() ? MASK : money(v.pnl, { sign: true })) + ` · ${pct(v.pct)}` : ''}</small>${has && v.est ? '<em>≈</em>' : ''}</button>`);
+    }
+    openModal({
+      title: o.title,
+      body: `<div class="cal-grid y1">${cells.join('')}</div><p class="hint" style="margin-top:12px">${o.hint || ''}</p>`,
+      footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" data-cal-today>${ic('clock')}${t('calThisYear')}</button>`,
+      onMount(m) {
+        m.addEventListener('click', e => {
+          const db = e.target.closest('[data-y]');
+          if (db || e.target.closest('[data-cal-today]')) { closeModal(); o.onPick(db ? db.dataset.y : String(cy)); }
+        });
+      }
+    });
+  }
+  /** 资产日盈亏排行的日历 */
+  function openRankCal() {
+    const tk = todayKey();
+    openDayCal({
+      title: t('rankCalT'), sel: UI.rankDay, hint: t('rankCalHint'),
+      val: k => (k === tk ? DB.assets.reduce((s2, a) => s2 + dayChange(a).ch, 0) : daySum(k)),
+      onPick: k => { UI.rankDay = k === tk ? '' : k; renderMoves(); }
+    });
+  }
+  /** 指标卡日历：day / month / year / total / cls_stock … */
+  function openKpiCal(k) {
+    const tk = todayKey(), sel = (UI.kd || {})[k] || '';
+    const pick = v => { UI.kd = UI.kd || {}; UI.kd[k] = v; refreshKpis(); };
+    if (k === 'month') return openMonthCal({ title: t('kpiCalT_month'), sel, hint: t('kpiCalHint_period'), val: invMonth, onPick: m => pick(m === tk.slice(0, 7) ? '' : m) });
+    if (k === 'year') return openYearCal({ title: t('kpiCalT_year'), sel, hint: t('kpiCalHint_period'), val: invYear, onPick: y => pick(y === tk.slice(0, 4) ? '' : y) });
+    if (k === 'total') return openDayCal({ title: t('kpiCalT_total'), sel, monthSum: false, hint: t('kpiCalHint_total'), val: d => { const r = invTotalAt(d); return r ? r.pnl : null; }, onPick: d => pick(d === tk ? '' : d) });
+    const c = k.startsWith('cls_') ? k.slice(4) : '';
+    openDayCal({ title: c ? t('kpiCalT_cls', { c: t('cls_' + c) }) : t('kpiCalT_day'), sel, hint: t('kpiCalHint_day'),
+      val: d => { const r = invDay(d, c); return r ? r.pnl : null; }, onPick: d => pick(d === tk ? '' : d) });
   }
   function renderMoves() {
     if (!$('#rank')) return;
@@ -3030,6 +3183,8 @@
     'date-picker'(el) { openDatePicker(el); },
     'rank-menu'(el) { openRankMenu(el); },
     'rank-cal'() { openRankCal(); },
+    'kpi-cal'(el) { openKpiCal(el.dataset.k); },
+    'kpi-live'(el) { UI.kd = UI.kd || {}; UI.kd[el.dataset.k] = ''; refreshKpis(); },
     'rank-today'() { UI.rankDay = ''; renderMoves(); },
     'rank-mode'(el) { S().rankMode = el.dataset.v; save(); $$('[data-action="rank-mode"]').forEach(b => b.classList.toggle('on', b === el)); renderMoves(); },
     'sort-toggle'(el) {

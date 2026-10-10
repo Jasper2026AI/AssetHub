@@ -994,3 +994,29 @@ body.mobile .upd-bar{bottom:calc(84px + env(safe-area-inset-bottom))}
   .cal-cell b{font-size:12px}
   .cal-cell small{font-size:9px;letter-spacing:-.2px}
 }
+
+/* ===== v5.7 指标卡日历 ===== */
+.kpi .lbl .cal-mini{margin-left:auto;width:24px;height:24px}
+.kpi .lbl .cal-mini svg.i{width:13px;height:13px}
+.cal-mini.on{color:var(--accent);background:var(--accent-soft);border-color:rgba(255,144,0,.4)}
+.day-chip.sm{height:20px;padding:0 6px;font-size:11px;gap:3px;vertical-align:middle}
+.day-chip.sm svg{width:11px;height:11px}
+.est-tag{display:inline-block;font-size:10px;font-weight:600;padding:1px 5px;border-radius:6px;background:rgba(255,255,255,.08);color:var(--text-2);vertical-align:middle}
+.cal-grid.m4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cal-grid.m4 .cal-cell{min-height:58px}
+.cal-grid.y1{grid-template-columns:1fr}
+.cal-grid.y1 .cal-cell{flex-direction:row;justify-content:space-between;min-height:48px;padding:0 16px}
+.cal-grid.y1 .cal-cell b{font-size:15px}
+.cal-grid.y1 .cal-cell small{font-size:13px}
+.cal-cell{position:relative}
+.cal-cell em{position:absolute;top:3px;right:6px;font-style:normal;font-size:10px;color:rgba(255,255,255,.45)}
+.cal-grid.y1 .cal-cell em{position:static;margin-left:6px}
+.cal-grid.y1 .cal-cell small{margin-left:auto}
+.kpi .lbl{white-space:nowrap;min-width:0}
+.kpi .sub:has(.day-chip){white-space:normal;overflow:visible;line-height:1.7}
+@media (max-width:520px){
+  .kpi .lbl{gap:6px}
+  .kpi .lbl .ico{width:22px;height:22px;border-radius:7px}
+  .kpi .lbl .ico svg.i{width:13px;height:13px}
+  .kpi .lbl .cal-mini{width:22px;height:22px;border-radius:8px}
+}
