@@ -52,7 +52,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -189,7 +189,7 @@
      每条资产 / 记账自带 log：[{ts, act, diffs:[[字段, 旧值, 新值]], extra}]
      DB.audit 为全局操作日志（含已删除的记录），最多保留 2000 条 */
   const ASSET_FIELDS = ['name', 'code', 'cls', 'warehouse', 'ccy', 'qty', 'cost', 'price', 'unit', 'source', 'note', 'locked', 'balMode'];
-  const TX_FIELDS = ['date', 'type', 'cat', 'amount', 'ccy', 'accountId', 'toId', 'toAmount', 'fee', 'note'];
+  const TX_FIELDS = ['date', 'type', 'cat', 'amount', 'ccy', 'accountId', 'toId', 'toAmount', 'fee', 'feeId', 'note'];
   const same = (x, y) => JSON.stringify(x == null ? '' : x) === JSON.stringify(y == null ? '' : y);
   function diffOf(oldR, newR, fields) {
     const d = [];
@@ -240,7 +240,13 @@
     DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
     // 每日快照：同一个 Gist 的两台设备互相合并；换了 Gist（另一个账本）就直接用云端的，不把旧账本的历史带进来
     const sameBook = S().snapsGist === S().gistId;
+    const loc = DB.snaps;
     DB.snaps = sameBook ? Object.assign({}, c.snaps, DB.snaps) : (c.snaps || {});
+    // 同一天两边都有记录：各资产日盈亏明细取更晚记录的那一份（例如那天只在手机上打开过到很晚）
+    if (sameBook && c.snaps) Object.keys(c.snaps).forEach(k => {
+      const cs = c.snaps[k], ls = loc[k];
+      if (ls && cs && cs.d && (!ls.d || (cs.dt || 0) > (ls.dt || 0))) DB.snaps[k] = Object.assign({}, ls, { d: cs.d, dt: cs.dt });
+    });
     const seen = new Set(), merged = [];
     (sameBook ? DB.audit || [] : []).concat(obj.audit || []).sort((x, y) => x.ts - y.ts).forEach(e => { const k = e.ts + e.kind + e.id + e.act; if (!seen.has(k)) { seen.add(k); merged.push(e); } });
     DB.audit = merged.slice(-2000);
@@ -575,6 +581,7 @@
     unlockUntil: 0,
     kEnd: 0,                                            // 日K 视窗末端偏移（0 = 最新）
     hold: { q: '', cls: 'all', src: 'all', wh: '__all', sort: 'valDesc', batch: false, sel: new Set() },
+    rankDay: '',                                        // 资产日盈亏查看的历史日期（空 = 今天）
     led: { mode: 'month', date: '', type: 'all', cat: 'all', acct: 'all', q: '', sort: 'dateDesc', batch: false, sel: new Set() }
   };
 
@@ -708,6 +715,14 @@
       if (s.po[a.id] == null) s.po[a.id] = +a.price || 0;
       if (!a.addPrice && a.price > 0) a.addPrice = +a.price;
     });
+    // d：当天每项资产的日盈亏 [USD, 涨跌%]，用于“资产日盈亏”按日期查看历史排行
+    s.d = {};
+    DB.assets.forEach(a => {
+      const x = dayChange(a, keys);
+      if (Math.abs(x.ch) < 1e-9 && !isBalance(a) && !(+a.qty)) return;
+      s.d[a.id] = [Math.round(conv(x.ch, S().ccy, 'USD') * 100) / 100, Math.round((x.pct || 0) * 100) / 100];
+    });
+    s.dt = Date.now();
   }
   function pruneSnaps() {
     // 只保留最近 60 天 + 每月最后一天的价格明细，控制存储体积
@@ -718,13 +733,14 @@
       if (first) { first.o = first.h = first.l = first.c; }   // 起始日那根 K 线只保留收盘值
     }
     const keys = Object.keys(DB.snaps).sort();
-    const cut = ymd(new Date(Date.now() - 60 * 864e5));
+    const cut = ymd(new Date(Date.now() - 60 * 864e5)), dCut = ymd(new Date(Date.now() - 400 * 864e5));
     keys.forEach((k, i) => {
       const next = keys[i + 1];
       const monthEnd = !next || next.slice(0, 7) !== k.slice(0, 7);
       const sn = DB.snaps[k];
       if (k < cut && !monthEnd) { delete sn.p; delete sn.b; }
       if (k < todayKey()) { delete sn.po; delete sn.bo; }
+      if (k < dCut) delete sn.d;
     });
   }
   const snapKeys = () => Object.keys(DB.snaps).sort();
@@ -824,7 +840,9 @@
   /* ---- 记账 ---- */
   // 转账可在任意资产之间进行：amount / fee 是转出资产的“数量”（现金类即金额），value / feeValue 是折算成 ccy 的价值
   const txD = x => conv(x.type === 'transfer' && x.value != null ? +x.value : +x.amount || 0, x.ccy || S().ccy);
-  const feeD = x => (x.type === 'transfer' && x.fee > 0 ? conv(x.feeValue != null ? +x.feeValue : +x.fee, x.ccy || S().ccy) : 0);
+  const feeD = x => (x.type === 'transfer' && x.fee > 0 ? conv(x.feeValue != null ? +x.feeValue : +x.fee, x.feeCcy || x.ccy || S().ccy) : 0);
+  /** 手续费显示：单独的手续费账户按它自己的数量 / 币种显示（如 0.0012 BNB） */
+  const feeTxt = x => qtyTxt(x.fee, x.feeId ? x.feeUnit : x.fromUnit, x.feeCcy || x.ccy) + (x.feeId && !x.feeUnit ? ` · ${esc(acctName(x.feeId))}` : '');
   /** 数量单位：现金 / 负债按金额（返回空串），其他资产按代码或单位 */
   const qtyUnit = a => (!a || isBalance(a) ? '' : (a.code || (a.unit ? unitLabel(a.unit) : '') || a.name));
   const unitPx = a => (!a || isBalance(a) ? 1 : +a.price || 0);
@@ -1067,8 +1085,8 @@
         <div class="card glass">
           <div class="card-head"><div class="card-title"><div class="seg seg-title sm">
               <button class="${S().rankMode !== 'total' ? 'on' : ''}" data-action="rank-mode" data-v="day">${t('rankDayTitle')}</button>
-              <button class="${S().rankMode === 'total' ? 'on' : ''}" data-action="rank-mode" data-v="total">${t('rankTotalTitle')}</button></div>${liveBadge()}</div>
-            <div class="head-tools"><span id="sort-moveSort">${sortBtnHTML('moveSort')}</span><button class="pill-select" data-action="rank-menu" data-key="moveCls" id="pill-moveCls">${rankPillHTML('moveCls')}</button>
+              <button class="${S().rankMode === 'total' ? 'on' : ''}" data-action="rank-mode" data-v="total">${t('rankTotalTitle')}</button></div><span id="rank-live">${liveBadge()}</span></div>
+            <div class="head-tools"><span id="rank-cal"></span><span id="sort-moveSort">${sortBtnHTML('moveSort')}</span><button class="pill-select" data-action="rank-menu" data-key="moveCls" id="pill-moveCls">${rankPillHTML('moveCls')}</button>
             <button class="link" data-action="nav" data-page="holdings">${t('viewAll')}${ic('chev-r')}</button></div></div>
           <div id="rank"></div>
         </div>
@@ -1207,21 +1225,105 @@
     document.addEventListener('pointerdown', popOutside, true);
   }
   /** 资产日变化排行：今日变化由大到小（正 → 0 → 负），现金余额变化、手动更新的市值变化都计入 */
+
+  /* ---- 资产日盈亏：按日期查看历史排行 ----
+     有记录（v5.6 起每天保存各资产日盈亏）的日子直接用记录；更早的日子用价格 / 余额快照按当前持有数量估算 */
+  function histDay(k) {
+    const sn = DB.snaps[k];
+    if (!sn) return null;
+    if (sn.d) {
+      const rows = [];
+      DB.assets.forEach(a => { const v = sn.d[a.id]; if (v) rows.push({ a, ch: conv(v[0], 'USD'), pct: v[1] }); });
+      return { rows, est: false };
+    }
+    const keys = snapKeys(), i = keys.indexOf(k);
+    if (!sn.p && !sn.b) return null;
+    let prev = null;
+    for (let j = i - 1; j >= 0; j--) { const ps = DB.snaps[keys[j]]; if (ps.p || ps.b) { prev = ps; break; } }
+    if (!prev) return null;
+    const rows = [];
+    DB.assets.forEach(a => {
+      const bal = isBalance(a), f = bal ? 'b' : 'p', cur = sn[f] && sn[f][a.id], ref = prev[f] && prev[f][a.id];
+      if (cur == null || ref == null) return;
+      const ccy = aCcy(a);
+      if (bal) { const ch = conv(cur - ref, ccy); rows.push({ a, ch, pct: ref ? (ch / Math.abs(conv(ref, ccy))) * 100 : 0 }); return; }
+      const q = +a.qty || 0, ch = conv(q * (cur - ref), ccy), base = conv(q * ref, ccy);
+      rows.push({ a, ch, pct: base ? (ch / Math.abs(base)) * 100 : 0 });
+    });
+    return { rows, est: true };
+  }
+  /** 日历格子里的短金额：≥1000 用 K / M，≥100 不带小数 */
+  const calNum = v => {
+    const a = Math.abs(v), sg = v > 0 ? '+' : v < 0 ? '-' : '';
+    if (a >= 1e6) return sg + +(a / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return sg + +(a / 1e3).toFixed(a >= 1e5 ? 0 : 1) + 'K';
+    return sg + fmtNum(a, 0, a >= 100 ? 0 : 2);
+  };
+  const daySum = k => { const h = histDay(k); return h ? h.rows.reduce((s2, x) => s2 + x.ch, 0) : null; };
+  /** 日历：每天显示当天资产日盈亏合计，点某天查看那天的排行 */
+  function openRankCal(month) {
+    const tk = todayKey(), keys = snapKeys(), first = keys[0] || tk;
+    const cur = month || (UI.rankDay || tk).slice(0, 7);
+    const [y, mo] = cur.split('-').map(Number);
+    const startDow = (new Date(y, mo - 1, 1).getDay() + 6) % 7, days = new Date(y, mo, 0).getDate();
+    const shift = n => { const d = new Date(y, mo - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+    const canPrev = shift(-1) >= first.slice(0, 7), canNext = shift(1) <= tk.slice(0, 7);
+    const cells = [];
+    for (let i = 0; i < startDow; i++) cells.push('<div class="cal-cell empty"></div>');
+    let mSum = 0, mDays = 0;
+    for (let d = 1; d <= days; d++) {
+      const k = `${cur}-${String(d).padStart(2, '0')}`;
+      const v = k === tk ? DB.assets.reduce((s2, a) => s2 + dayChange(a, keys).ch, 0) : k > tk ? null : daySum(k);
+      const has = v != null, sel = (UI.rankDay || tk) === k;
+      if (has) { mSum += v; mDays++; }
+      cells.push(`<button type="button" class="cal-cell ${has ? upDown(v) || 'flat' : 'none'} ${sel ? 'sel' : ''} ${k === tk ? 'today' : ''}" ${has ? `data-day="${k}"` : 'disabled'}>
+        <b>${d}</b><small class="num">${has ? (hidden() ? '•••' : calNum(v)) : ''}</small></button>`);
+    }
+    const dows = (S().lang === 'en' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['一', '二', '三', '四', '五', '六', '日']).map(x => `<div class="cal-dow">${x}</div>`).join('');
+    const title = S().lang === 'en' ? new Date(y, mo - 1, 1).toLocaleDateString('en-US', { year: 'numeric', month: 'long' }) : `${y} 年 ${mo} 月`;
+    openModal({
+      title: t('rankCalT'),
+      body: `<div class="cal-nav"><button class="icon-btn sm" data-cal-m="${shift(-1)}" ${canPrev ? '' : 'disabled'}>${ic('chev-l')}</button>
+          <div class="cal-title"><b>${title}</b><small class="num ${upDown(mDays ? mSum : 0)}">${mDays ? t('rankCalMonth', { v: money(mSum, { sign: true }) }) : t('rankCalNone')}</small></div>
+          <button class="icon-btn sm" data-cal-m="${shift(1)}" ${canNext ? '' : 'disabled'}>${ic('chev-r')}</button></div>
+        <div class="cal-grid">${dows}${cells.join('')}</div>
+        <p class="hint" style="margin-top:12px">${t('rankCalHint')}</p>`,
+      footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" data-cal-today>${ic('clock')}${t('rankCalToday')}</button>`,
+      onMount(m) {
+        m.addEventListener('click', e => {
+          const nb = e.target.closest('[data-cal-m]'); if (nb && !nb.disabled) { openRankCal(nb.dataset.calM); return; }
+          const db = e.target.closest('[data-day]');
+          if (db || e.target.closest('[data-cal-today]')) {
+            const k = db ? db.dataset.day : tk;
+            UI.rankDay = k === tk ? '' : k;
+            closeModal(); renderMoves();
+          }
+        });
+      }
+    });
+  }
   function renderMoves() {
     if (!$('#rank')) return;
     const total = S().rankMode === 'total', c = S().moveCls, keys = snapKeys();
-    const list = DB.assets.filter(a => inCls(a, c)).map(a => Object.assign({ a }, total ? totalChange(a) : dayChange(a, keys))).sort((x, y) => (S().moveSort === 'asc' ? x.ch - y.ch : y.ch - x.ch));
+    if (UI.rankDay && (UI.rankDay >= todayKey() || !DB.snaps[UI.rankDay])) UI.rankDay = '';
+    const day = !total && UI.rankDay ? UI.rankDay : '', hist = day ? histDay(day) : null;
+    // 标题旁：今天显示“实时”，历史日期显示日期标签（点 × 回到今天）；日历按钮只在资产日盈亏下出现
+    const cal = $('#rank-cal'), live = $('#rank-live');
+    if (cal) cal.innerHTML = total ? '' : `<button class="icon-btn sm cal-btn ${day ? 'on' : ''}" data-action="rank-cal" title="${t('rankCalT')}">${ic('cal')}</button>`;
+    if (live) live.innerHTML = day ? `<button class="day-chip" data-action="rank-today" title="${t('rankCalToday')}">${ic('cal')}${day.slice(5).replace('-', '/')} ${t('wd' + ((new Date(day + 'T00:00:00').getDay() + 6) % 7))}${ic('x')}</button>` : liveBadge();
+    const src = day ? (hist ? hist.rows : []) : DB.assets.map(a => Object.assign({ a }, total ? totalChange(a) : dayChange(a, keys)));
+    const list = src.filter(x => inCls(x.a, c)).sort((x, y) => (S().moveSort === 'asc' ? x.ch - y.ch : y.ch - x.ch));
     const top = Math.max(1e-9, ...list.map(x => Math.abs(x.ch)));
     const sum = list.reduce((s, x) => s + x.ch, 0);
-    $('#rank').innerHTML = !DB.assets.length ? emptyState('assets') : !list.length ? `<div class="empty sm"><p>${t('noMatchCls')}</p></div>` :
-      `<div class="rank-sum">${t(total ? 'rankTotalSum' : 'rankDaySum')} <b class="num ${upDown(sum)}">${money(sum, { sign: true })}</b><span class="dim">· ${t(total ? 'rankTotalHint' : 'rankDayHint')}</span></div>
+    $('#rank').innerHTML = !DB.assets.length ? emptyState('assets') : day && !hist ? `<div class="empty sm"><p>${t('rankCalNoData')}</p></div>` : !list.length ? `<div class="empty sm"><p>${t('noMatchCls')}</p></div>` :
+      `<div class="rank-sum">${day ? t('rankDaySumOn', { d: day.slice(5).replace('-', '/') }) : t(total ? 'rankTotalSum' : 'rankDaySum')} <b class="num ${upDown(sum)}">${money(sum, { sign: true })}</b><span class="dim">· ${day ? t(hist && hist.est ? 'rankDayEst' : 'rankDayRec') : t(total ? 'rankTotalHint' : 'rankDayHint')}</span></div>
       <div class="rank rank-scroll">${list.map((x, i) => {
         const a = x.a, z = Math.abs(x.ch) < 0.005;
         return `<div class="rank-row ${z ? 'zero' : ''}">
           <span class="rank-no">${i + 1}</span>
           <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}${a.warehouse ? `<span class="rk-wh">${esc(a.warehouse)}</span>` : ''}</div>
             <div class="bar"><i style="width:${z ? 0 : Math.max(2, (Math.abs(x.ch) / top) * 100)}%;background:${x.ch < 0 ? 'var(--down)' : 'var(--up)'}"></i></div></div>
-          <div class="rank-val num ${z ? 'dim' : upDown(x.ch)}">${z ? '—' : money(x.ch, { sign: true })}<small class="${z ? 'dim' : upDown(x.ch)}">${z ? t('noChange') : pct(x.pct)} · ${money(aValD(a))}</small></div>
+          <div class="rank-val num ${z ? 'dim' : upDown(x.ch)}">${z ? '—' : money(x.ch, { sign: true })}<small class="${z ? 'dim' : upDown(x.ch)}">${z ? t('noChange') : pct(x.pct)}${day ? '' : ' · ' + money(aValD(a))}</small></div>
         </div>`;
       }).join('')}</div>`;
   }
@@ -1400,7 +1502,7 @@
       <div class="tx-main"><div class="tx-title">${catName(x.cat)}${x.note ? `<span class="nt">${esc(x.note)}</span>` : ''}</div>
         <div class="tx-meta">${x.date} · ${esc(txAcct(x))}${txWh(x) ? ` <span class="wh-tag">${ic('db')}${esc(txWh(x))}</span>` : ''}</div></div>
       <div class="tx-amt num ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}
-        ${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${qtyTxt(x.fee, x.fromUnit, x.ccy)}</small>` : ''}
+        ${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${feeTxt(x)}</small>` : ''}
         ${withOps && !batch ? `<div class="tx-ops">${histBtn('tx', x.id)}<button class="op edit" data-action="edit-tx" data-id="${x.id}">${ic('edit')}</button><button class="op del" data-action="del-tx" data-id="${x.id}">${ic('trash')}</button></div>` : ''}
       </div></div>`;
   }
@@ -1578,7 +1680,7 @@
     let list = DB.txs.filter(x => inPeriod(x, L.mode, L.date)
       && (L.type === 'all' || x.type === L.type)
       && (L.cat === 'all' || x.cat === L.cat)
-      && (L.acct === 'all' || (L.acct === 'none' ? !x.accountId : x.accountId === L.acct || x.toId === L.acct)));
+      && (L.acct === 'all' || (L.acct === 'none' ? !x.accountId : x.accountId === L.acct || x.toId === L.acct || x.feeId === L.acct)));
     if (q) list = list.filter(x => [x.note, catName(x.cat), txAcct(x)].some(v => String(v || '').toLowerCase().includes(q)));
     if (L.sort === 'dateAsc') list = sortTxDate(list).reverse();
     else if (L.sort === 'amtDesc') list.sort((a, b) => txD(b) - txD(a));
@@ -1652,7 +1754,7 @@
             <td><span style="margin-right:6px">${CAT_ICON[x.cat] || ''}</span>${catName(x.cat)}</td>
             <td class="muted">${esc(txAcct(x))}${txWh(x) ? `<small class="wh-sm">${ic('db')}${esc(txWh(x))}</small>` : ''}${x.applied ? `<small>${t('synced')}</small>` : ''}</td>
             <td class="note" title="${esc(x.note)}">${esc(x.note) || '<span class="dim">—</span>'}</td>
-            <td class="r num strong ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.type === 'transfer' && (x.toUnit || x.fromUnit || (x.toCcy && x.toCcy !== x.ccy)) ? `<small>${t('received')} ${qtyTxt(x.toAmount, x.toUnit, x.toCcy)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${qtyTxt(x.fee, x.fromUnit, x.ccy)}</small>` : ''}</td>
+            <td class="r num strong ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.type === 'transfer' && (x.toUnit || x.fromUnit || (x.toCcy && x.toCcy !== x.ccy)) ? `<small>${t('received')} ${qtyTxt(x.toAmount, x.toUnit, x.toCcy)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${feeTxt(x)}</small>` : ''}</td>
             <td class="c">${L.batch ? '' : `<div class="ops">${histBtn('tx', x.id)}<button class="op edit" data-action="edit-tx" data-id="${x.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-tx" data-id="${x.id}">${ic('trash')}${t('del')}</button></div>`}</td>
           </tr>`;
         }).join('')}</tbody></table></div></div>`;
@@ -1948,8 +2050,9 @@
   }
   const validCcy = c => /^[A-Z]{3,5}$/.test(c) && !!rateOf(c);
   /** 转账账户：所有资产按仓库分组；现金类显示余额，其他显示持有数量 */
-  function balOptions(sel) {
-    return `<option value="">${t('pickAcct')}</option>` + whGroups().map(gr =>
+  const NEW_OPT = () => `<option value="__new">${t('newAssetOpt')}</option>`;
+  function balOptions(sel, first, extra) {
+    return `<option value="">${first || t('pickAcct')}</option>` + (extra || '') + whGroups().map(gr =>
       `<optgroup label="${esc(gr.label)}">${gr.list.map(a => {
         const u = qtyUnit(a), amt = hidden() ? MASK : u ? `${trim8(+a.qty || 0)} ${u}` : `${aCcy(a)} ${fmtNum(+a.qty || 0, 0, 2)}`;
         return `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)} (${esc(amt)})</option>`;
@@ -1974,13 +2077,29 @@
         <div class="field"><label id="tf-acct-l">${t('account')}</label><select class="input" id="tf-acct">${accountOptions(st.accountId)}</select></div>
       </div>
       <div class="row2" id="tf-to-row" style="display:none">
-        <div class="field"><label>${t('transferTo')}</label><select class="input" id="tf-to">${balOptions(st.toId)}</select></div>
+        <div class="field"><label>${t('transferTo')}</label><select class="input" id="tf-to">${balOptions(st.toId, '', NEW_OPT())}</select></div>
         <div class="field" id="tf-recv-wrap" style="visibility:hidden"><label id="tf-recv-l">${t('received')}</label><input class="input num" id="tf-recv" inputmode="decimal" autocomplete="off" value="${st.toAmount != null ? esc(trim8(st.toAmount)) : ''}"></div>
       </div>
+      <div class="tf-new" id="tf-new" style="display:none">
+        <div class="tf-new-h">${ic('plus')}<b>${t('newAssetT')}</b><small>${t('newAssetSub')}</small></div>
+        <div class="row2">
+          <div class="field"><label>${t('assetClass')}</label><select class="input" id="tn-cls">${CLASSES.filter(c => c !== 'liability').map(c => `<option value="${c}">${t('cls_' + c)}</option>`).join('')}</select></div>
+          <div class="field"><label>${t('priceCcy')}</label><select class="input" id="tn-ccy">${txCcyList().map(c => `<option value="${c}">${CCY_SHORT[c] || c}</option>`).join('')}</select></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>${t('assetCode')}</label><input class="input" id="tn-code" maxlength="20" autocomplete="off" spellcheck="false" style="text-transform:uppercase" placeholder="BTC / ETH / AAPL"></div>
+          <div class="field"><label>${t('assetName')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="tn-name" maxlength="40" autocomplete="off"></div>
+        </div>
+        <div class="field" style="margin-bottom:0"><label>${t('warehouse')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="tn-wh" list="tn-wh-list" maxlength="40" placeholder="${t('warehousePh')}">
+          <datalist id="tn-wh-list">${Array.from(new Set(WAREHOUSE_PRESETS.concat(DB.assets.map(a => a.warehouse).filter(Boolean)))).map(w => `<option value="${esc(w)}">`).join('')}</datalist></div>
+      </div>
       <div class="hint" id="tf-val-hint" style="display:none;margin:-6px 0 12px"></div>
-      <div class="field" id="tf-fee-wrap" style="display:none"><label id="tf-fee-l">${t('fee')}</label>
-        <input class="input num" id="tf-fee" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${st.fee > 0 ? esc(trim8(st.fee)) : ''}">
-        <div class="hint" id="tf-fee-hint"></div></div>
+      <div id="tf-fee-wrap" style="display:none">
+        <div class="row2">
+          <div class="field"><label>${t('feeAcct')}</label><select class="input" id="tf-fee-acct">${balOptions(st.feeId || '', t('feeSame'))}</select></div>
+          <div class="field"><label id="tf-fee-l">${t('fee')}</label><input class="input num" id="tf-fee" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${st.fee > 0 ? esc(trim8(st.fee)) : ''}"></div>
+        </div>
+        <div class="hint" id="tf-fee-hint" style="margin:-6px 0 12px"></div></div>
       <div class="field" id="tf-cats-wrap"><label>${t('category')}</label><div class="cat-grid" id="tf-cats"></div></div>
       <label class="switch-row" id="tf-sync-row"><span>${t('syncBalance')}<small id="tf-sync-sub">${t('syncBalanceSub')}</small></span>
         <span class="switch"><input type="checkbox" id="tf-sync" ${st.sync ? 'checked' : ''}><i></i></span></label>
@@ -2011,11 +2130,22 @@
         // 编辑已同步过的记录时沿用当时的价格，避免因行情变化导致数量对不上
         const syncPx = a => (ex && ex.applied && ex.accountId === a.id && ex.appliedPx > 0 ? +ex.appliedPx : +a.price || 0);
         let recvTouched = !!(ex && ex.type === 'transfer');
+        /** 转入“新建资产”：按小表单生成一项新资产（还没保存），保存转账时才加入资产列表 */
+        const draftAsset = () => {
+          const cls = $('#tn-cls', m).value, code = $('#tn-code', m).value.trim().toUpperCase(), name = $('#tn-name', m).value.trim();
+          const a = { cls: [cls], code, name: name || code, ccy: $('#tn-ccy', m).value, qty: 0, cost: 0, price: 0, unit: '', note: '', warehouse: $('#tn-wh', m).value.trim(), locked: false, noQty: false, balMode: false, source: 'online' };
+          if (isBalance(a)) { a.cost = 1; a.price = 1; a.source = 'manual'; a.code = ''; a.name = name || code; }
+          else if (!Api.canQuote(a)) a.source = 'manual';
+          return a;
+        };
         /** 转账：可在任意资产之间互转。金额框填转出“数量”（现金类为金额）；到账数量按价值自动折算，可手动改 */
         const trSync = () => {
           if (!isTr()) return;
-          const f = findAsset($('#tf-acct', m).value), to = findAsset($('#tf-to', m).value), sel = $('#tf-ccy', m);
-          const fu = qtyUnit(f), tu = qtyUnit(to);
+          const f = findAsset($('#tf-acct', m).value), isNew = $('#tf-to', m).value === '__new', sel = $('#tf-ccy', m);
+          $('#tf-new', m).style.display = isNew ? '' : 'none';
+          const to = isNew ? draftAsset() : findAsset($('#tf-to', m).value);
+          const fu = qtyUnit(f), tu = isNew ? (isBalance(to) ? '' : (to.code || to.name || '—')) : qtyUnit(to);
+          const fa = findAsset($('#tf-fee-acct', m).value) || f, feeU = qtyUnit(fa), feeOther = fa && f && fa.id !== f.id;
           if (f) {
             if (![...sel.options].some(o => o.value === aCcy(f))) sel.insertAdjacentHTML('afterbegin', `<option value="${aCcy(f)}">${aCcy(f)}</option>`);
             sel.value = aCcy(f); $('#tf-sym', m).textContent = fu ? '' : symOf(aCcy(f)).trim();
@@ -2023,18 +2153,26 @@
           sel.style.display = fu ? 'none' : '';
           $('#tf-unit', m).textContent = fu; $('#tf-unit', m).style.display = fu ? '' : 'none';
           $('#tf-amount', m).placeholder = fu ? '0.00000000' : '0.00';
-          $('#tf-fee-l', m).innerHTML = `${t('fee')}${f ? ` (${esc(fu || aCcy(f))})` : ''} <span class="dim">· ${t('codeOpt')}</span>`;
+          $('#tf-fee-l', m).innerHTML = `${t('fee')}${fa ? ` (${esc(feeU || aCcy(fa))})` : ''} <span class="dim">· ${t('codeOpt')}</span>`;
           const amt = parseNum($('#tf-amount', m).value) || 0, fee0 = parseNum($('#tf-fee', m).value) || 0;
-          $('#tf-fee-hint', m).innerHTML = f && fee0 > 0 ? t('feeHint', { a: fu ? `${trim8(round8(amt + fee0))} ${esc(fu)}` : money(amt + fee0, { ccy: aCcy(f), max: 8, raw: true }) }) : t('feeHint0');
-          const val = f ? amt * unitPx(f) : 0, vh = $('#tf-val-hint', m);
-          vh.style.display = f && fu && amt > 0 ? '' : 'none';
-          if (f && fu) vh.innerHTML = t('transferValue', { v: money(val, { ccy: aCcy(f), max: 2, raw: true }), q: `${trim8(+f.qty || 0)} ${esc(fu)}` });
-          const diff = f && to && (fu || tu || aCcy(f) !== aCcy(to));
+          const feeQ = n => (feeU ? `${trim8(round8(n))} ${esc(feeU)}` : money(n, { ccy: aCcy(fa), max: 8, raw: true }));
+          $('#tf-fee-hint', m).innerHTML = feeOther
+            ? t('feeHintOther', { n: esc(fa.name), a: fee0 > 0 ? feeQ(fee0) : '—', h: feeU ? `${hidden() ? MASK : trim8(+fa.qty || 0)} ${esc(feeU)}` : money(+fa.qty || 0, { ccy: aCcy(fa) }) })
+            : f && fee0 > 0 ? t('feeHint', { a: fu ? `${trim8(round8(amt + fee0))} ${esc(fu)}` : money(amt + fee0, { ccy: aCcy(f), max: 8, raw: true }) }) : t('feeHint0');
+          const val = f ? amt * unitPx(f) : 0, vh = $('#tf-val-hint', m), recv = parseNum($('#tf-recv', m).value) || 0;
+          const showAvg = isNew && f && !isBalance(to) && amt > 0 && recv > 0;
+          vh.style.display = (f && fu && amt > 0) || showAvg ? '' : 'none';
+          const parts = [];
+          if (f && fu && amt > 0) parts.push(t('transferValue', { v: money(val, { ccy: aCcy(f), max: 2, raw: true }), q: `${trim8(+f.qty || 0)} ${esc(fu)}` }));
+          if (showAvg) parts.push(t('newAssetAvg', { p: money(conv(val, aCcy(f), aCcy(to)) / recv, { ccy: aCcy(to), max: 8, raw: true }), u: esc(tu) }));
+          vh.innerHTML = parts.join('<br>');
+          const diff = f && to && (isNew ? !(isBalance(to) && !fu && aCcy(f) === aCcy(to)) : (fu || tu || aCcy(f) !== aCcy(to)));
           $('#tf-recv-wrap', m).style.visibility = diff ? 'visible' : 'hidden';
           if (diff) {
             $('#tf-recv-l', m).textContent = `${t('received')} (${tu || aCcy(to)})`;
             const px = unitPx(to);
-            if (!recvTouched && amt > 0 && px > 0) $('#tf-recv', m).value = trim8(round8(conv(val, aCcy(f), aCcy(to)) / px));
+            if (!isNew && !recvTouched && amt > 0 && px > 0) $('#tf-recv', m).value = trim8(round8(conv(val, aCcy(f), aCcy(to)) / px));
+            if (isNew && !recvTouched && isBalance(to) && amt > 0) $('#tf-recv', m).value = trim8(round8(conv(val, aCcy(f), aCcy(to))));
           }
         };
         const setMode = () => {
@@ -2053,7 +2191,25 @@
           const b = e.target.closest('[data-v]'); if (!b) return;
           st.type = b.dataset.v; $$('#tf-type button', m).forEach(x => x.classList.toggle('on', x === b)); setMode();
         });
-        $('#tf-to', m).addEventListener('change', () => { recvTouched = false; trSync(); });
+        $('#tf-to', m).addEventListener('change', e => {
+          recvTouched = false;
+          if (e.target.value === '__new') {
+            $('#tf-recv', m).value = '';
+            const f = findAsset($('#tf-acct', m).value);
+            if (f) {
+              const pc = primary(f);
+              $('#tn-cls', m).value = pc === 'cash' || pc === 'liability' ? 'crypto' : pc;
+              if (!$('#tn-wh', m).value) $('#tn-wh', m).value = f.warehouse || '';
+              const sel = $('#tn-ccy', m); if ([...sel.options].some(o => o.value === aCcy(f))) sel.value = aCcy(f);
+            }
+            setTimeout(() => $('#tn-code', m).focus(), 30);
+          }
+          trSync();
+        });
+        ['#tn-cls', '#tn-ccy', '#tn-code', '#tn-name', '#tn-wh'].forEach(q => $(q, m).addEventListener('input', trSync));
+        $('#tn-cls', m).addEventListener('change', () => { recvTouched = false; trSync(); });
+        $('#tf-fee-acct', m).addEventListener('change', trSync);
+        $('#tf-recv', m).addEventListener('input', trSync);
         $('#tf-recv', m).addEventListener('input', () => { recvTouched = true; });
         $('#tf-fee', m).addEventListener('input', trSync);
         $('#tf-amount', m).addEventListener('input', trSync);
@@ -2092,12 +2248,25 @@
           const date = $('#tf-date', m).value;
           if (!date) { toast(t('errDate'), 'err'); return; }
           if (isTr()) {
-            const fromId = $('#tf-acct', m).value, toId = $('#tf-to', m).value, f = findAsset(fromId), to = findAsset(toId);
+            const fromId = $('#tf-acct', m).value, isNew = $('#tf-to', m).value === '__new', f = findAsset(fromId);
+            let to = isNew ? draftAsset() : findAsset($('#tf-to', m).value);
+            if (isNew && f && !to.code && !to.name) { toast(t('errNeedName'), 'err'); $('#tn-code', m).focus(); return; }
+            if (isNew && to) to = Object.assign({ id: uid(), createdAt: Date.now(), updatedAt: Date.now() }, to);
+            const toId = to ? to.id : '';
             if (!f || !to) { toast(t('errTransferAcct'), 'err'); return; }
             if (fromId === toId) { toast(t('errTransferSame'), 'err'); return; }
             const fee = parseNum($('#tf-fee', m).value || '0');
             if (isNaN(fee) || fee < 0) { toast(t('errAmount'), 'err'); return; }
-            const fu = qtyUnit(f), tu = qtyUnit(to), value = round8(amount * unitPx(f));
+            let feeId = $('#tf-fee-acct', m).value || '';
+            if (feeId === fromId || !(fee > 0)) feeId = '';
+            const fa = feeId ? findAsset(feeId) : f, feeU = qtyUnit(fa);
+            const fu = qtyUnit(f), tu = isNew ? (isBalance(to) ? '' : (to.code || to.name)) : qtyUnit(to), value = round8(amount * unitPx(f));
+            if (isNew && !isBalance(to)) {
+              // 新资产：单价 = 转出价值 ÷ 到账数量（行情资产保存后会自动刷新为最新价）
+              const rq = parseNum($('#tf-recv', m).value);
+              if (!(rq > 0)) { toast(t('errRecv'), 'err'); $('#tf-recv', m).focus(); return; }
+              to.price = round8(conv(value, aCcy(f), aCcy(to)) / rq);
+            }
             let toAmount = amount;
             if (fu || tu || aCcy(f) !== aCcy(to)) {
               toAmount = parseNum($('#tf-recv', m).value);
@@ -2108,29 +2277,42 @@
             const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
             if (ex) applyTx(ex, -1);
             // 非现金资产：转出数量（含手续费）不能超过持有数量
-            if (fu && amount + fee > (+f.qty || 0) + 1e-9) {
+            if (fu && amount + (feeId ? 0 : fee) > (+f.qty || 0) + 1e-9) {
+              const hq = trim8(+f.qty || 0);
               if (ex) applyTx(ex, 1);
-              toast(t('errTransferQty', { q: `${trim8(+f.qty || 0)} ${fu}` }), 'err'); return;
+              toast(t('errTransferQty', { q: `${hq} ${fu}` }), 'err'); return;
+            }
+            // 单独的手续费账户（如用 BNB 抵扣）：扣的数量不能超过它的持有数量
+            if (feeId && feeU && fee > (+fa.qty || 0) + 1e-9) {
+              const hq = trim8(+fa.qty || 0);
+              if (ex) applyTx(ex, 1);
+              toast(t('errFeeQty', { n: fa.name, q: `${hq} ${feeU}` }), 'err'); return;
             }
             // 转入非现金资产：按转出部分的成本摊入平均成本
             const inCost = tu ? round8(conv(fu ? amount * (+f.cost || 0) : amount, aCcy(f), aCcy(to))) : null;
             Object.keys(tx).forEach(k => { if (!['id', 'createdAt', 'log'].includes(k)) delete tx[k]; });
-            Object.assign(tx, { date, type: 'transfer', cat: 'transfer', amount, ccy: aCcy(f), accountId: fromId, toId, toAmount, toCcy: aCcy(to), fee, value, feeValue: round8(fee * unitPx(f)), note: $('#tf-note', m).value.trim(), applied: true });
+            Object.assign(tx, { date, type: 'transfer', cat: 'transfer', amount, ccy: aCcy(f), accountId: fromId, toId, toAmount, toCcy: aCcy(to), fee, value, feeValue: round8(fee * unitPx(fa)), note: $('#tf-note', m).value.trim(), applied: true });
+            if (feeId) { tx.feeId = feeId; tx.feeCcy = aCcy(fa); if (feeU) tx.feeUnit = feeU; }
             if (fu) tx.fromUnit = fu;
+            if (isNew) {
+              DB.assets.push(to);
+              logOp('asset', to, 'create', ASSET_FIELDS.filter(k => !['locked'].includes(k) && to[k] !== '' && to[k] != null).map(k => [k, '', to[k]]), { tx: recTitle('tx', tx) });
+            }
             if (tu) { tx.toUnit = tu; tx.inCost = inCost; }
             applyTx(tx, 1);
             if (!ex) DB.txs.push(tx);
             if (old) { const d = diffOf(old, tx, TX_FIELDS); if (d.length) logOp('tx', tx, 'edit', d); } else logOp('tx', tx, 'create');
             logBalChanges(bal0, tx, old ? 'edit' : 'create');
             commit(); closeModal(); renderAll();
-            const q = (n, u) => (u ? `${trim8(n)} ${u}` : money(n, { ccy: aCcy(f), max: 8, raw: true }));
-            toast(`${t('transferDone')} · ${f.name} → ${to.name} ${q(amount, fu)}${fee > 0 ? ` · ${t('fee')} ${q(fee, fu)}` : ''}`, 'ok');
+            const q = (n, u, c) => (u ? `${trim8(n)} ${u}` : money(n, { ccy: c || aCcy(f), max: 8, raw: true }));
+            toast(`${t('transferDone')} · ${f.name} → ${to.name} ${q(amount, fu)}${fee > 0 ? ` · ${t('fee')} ${q(fee, feeU, aCcy(fa))}` : ''}${isNew ? ' · ' + t('newAssetMade', { n: to.name }) : ''}`, 'ok');
+            if (isNew && to.source === 'online') refreshOne(to);
             return;
           }
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           if (ex) applyTx(ex, -1);
-          ['toId', 'toAmount', 'toCcy', 'fee', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost'].forEach(k => delete tx[k]);
+          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
           delete tx.appliedPx; delete tx.appliedCost;
           const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;
@@ -2161,7 +2343,9 @@
     if (tx.type === 'transfer') {
       if (!tx.applied) return;
       const f = findAsset(tx.accountId), to = findAsset(tx.toId);
-      if (f) f.qty = round8((+f.qty || 0) - ((+tx.amount || 0) + (+tx.fee || 0)) * sign);   // 手续费从转出账户扣
+      const fa = tx.feeId ? findAsset(tx.feeId) : null;
+      if (f) f.qty = round8((+f.qty || 0) - ((+tx.amount || 0) + (tx.feeId ? 0 : +tx.fee || 0)) * sign);   // 手续费默认从转出账户扣
+      if (fa) fa.qty = round8((+fa.qty || 0) - (+tx.fee || 0) * sign);                                         // 指定了手续费账户（如 BNB）就从那里扣
       if (to) {
         const q = +to.qty || 0, dq = (+tx.toAmount || 0) * sign, nq = q + dq;
         // 转入非现金资产时同步摊薄 / 还原平均成本：新成本 = (原数量×原成本 + 转入成本) / 新数量
@@ -2401,7 +2585,7 @@
   function fmtField(f, v, kind) {
     if (v === '' || v == null) return '<span class="dim">∅</span>';
     if (f === 'cls') return esc((Array.isArray(v) ? v : [v]).map(c => t('cls_' + c)).join(' · '));
-    if (f === 'accountId' || f === 'toId') { const a = findAsset(v); return esc(a ? a.name : t('deletedAccount')); }
+    if (f === 'accountId' || f === 'toId' || f === 'feeId') { const a = findAsset(v); return esc(a ? a.name : t('deletedAccount')); }
     if (f === 'cat') return esc(catName(v));
     if (f === 'type') return esc(t(v));
     if (f === 'source') return esc(v === 'online' ? t('srcOnline') : t('srcManual'));
@@ -2845,6 +3029,8 @@
     'tx-type'(el) { UI.led.type = el.dataset.v; renderLedger(); },
     'date-picker'(el) { openDatePicker(el); },
     'rank-menu'(el) { openRankMenu(el); },
+    'rank-cal'() { openRankCal(); },
+    'rank-today'() { UI.rankDay = ''; renderMoves(); },
     'rank-mode'(el) { S().rankMode = el.dataset.v; save(); $$('[data-action="rank-mode"]').forEach(b => b.classList.toggle('on', b === el)); renderMoves(); },
     'sort-toggle'(el) {
       const k = el.dataset.key; S()[k] = S()[k] === 'asc' ? 'desc' : 'asc'; save();
