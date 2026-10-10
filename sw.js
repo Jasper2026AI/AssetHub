@@ -3,7 +3,7 @@
  * - version.json / 行情 / GitHub 同步等跨域请求：不经过缓存，直接走网络
  * - 同源静态资源（js/css/图片）：先用缓存秒开，后台再更新
  */
-const VER = '5.7';
+const VER = '5.8';
 const CACHE = 'assethub-v' + VER;
 const SHELL = [
   './',
@@ -15,6 +15,7 @@ const SHELL = [
   'assets/js/api.js?v=' + VER,
   'assets/js/app.js?v=' + VER,
   'assets/img/logo.png',
+  'assets/img/logo/C.svg',
   'assets/img/favicon.png',
   'assets/img/icon-192.png',
   'assets/img/icon-512.png',

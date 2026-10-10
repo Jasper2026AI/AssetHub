@@ -30,7 +30,18 @@
     food: '🍜', daily: '🛒', transport: '🚇', housing: '🏠', leisure: '🎮', digital: '💻', subscription: '🔁', medical: '💊', social: '🎁', investLoss: '📉', otherExp: '📦',
     transfer: '🔄', salary: '💼', bonus: '🏆', invest: '📈', parttime: '🧑‍💻', gift: '🧧', refund: '↩️', otherInc: '💰'
   };
-  const DEFAULT_LOGO = 'assets/img/logo.png';   // 默认品牌图标（木牛）
+  const DEFAULT_LOGO = 'assets/img/logo/C.svg';   // 默认品牌图标（木牛 · 单色剪影）
+  // 可选的木牛图标样式（设置 → 外观）：C 默认，wood = 原版木雕照片
+  const LOGO_STYLES = ['C', 'D', 'B', 'E', 'A', 'wood'];
+  const logoKey = () => (LOGO_STYLES.includes(DB.meta.logo) ? DB.meta.logo : 'C');
+  const logoOf = k => (k === 'wood' ? 'assets/img/logo/wood.png' : `assets/img/logo/${k}.svg`);
+  const logoSrc = () => DB.meta.icon || logoOf(logoKey());
+  /** 浏览器标签页图标、iPhone“添加到主屏幕”图标跟着所选样式走 */
+  function applyLogoLinks() {
+    const k = logoKey(), fav = document.querySelector('link[rel="icon"]'), touch = document.querySelector('link[rel="apple-touch-icon"]');
+    if (fav) { fav.href = DB.meta.icon || logoOf(k); fav.type = DB.meta.icon || k === 'wood' ? 'image/png' : 'image/svg+xml'; }
+    if (touch) touch.href = `assets/img/logo/touch-${k}.png`;
+  }
   const WAREHOUSE_PRESETS = ['Binance', 'BIT', 'OKX', 'Bitget Wallet', 'fomo', '支付宝', '微信', '招商银行卡', '建设银行卡', '中国银行卡', '农业银行卡'];
   const PNL_STYLES = {
     ios: { up: '#30D158', down: '#FF453A' },
@@ -52,7 +63,7 @@
     { id: 'ledger', icon: 'receipt', k: 'navLedger' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '5.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -237,7 +248,7 @@
     backupNow('pull');
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs;
-    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
+    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
     // 每日快照：同一个 Gist 的两台设备互相合并；换了 Gist（另一个账本）就直接用云端的，不把旧账本的历史带进来
     const sameBook = S().snapsGist === S().gistId;
     const loc = DB.snaps;
@@ -909,7 +920,8 @@
   }
   function renderHeader() {
     const s = S(), m = isMobile();
-    const icon = DB.meta.icon ? `<img src="${esc(DB.meta.icon)}" alt="">` : `<img src="${DEFAULT_LOGO}" alt="AssetHub">`;
+    const icon = `<img src="${esc(logoSrc())}" alt="AssetHub">`;
+    applyLogoLinks();
     const ccy = `<div class="mini-select ccy-select" title="${t('ccyUnit')}"><select data-change="ccy">${DISPLAY_CCYS.map(c => `<option value="${c}" ${c === s.ccy ? 'selected' : ''}>${CCY_SHORT[c]}</option>`).join('')}</select></div>`;
     const refresh = `<button class="icon-btn ${UI.busy ? 'spin' : ''}" data-action="refresh" title="${t('refresh')}">${ic('refresh')}</button>`;
     $('#topbar').innerHTML = `<div class="topbar-inner">
@@ -2046,8 +2058,11 @@
             <button class="${!s.pnlSwap ? 'on' : ''}" data-action="pnl-swap" data-v="0">${t('dirGreenUp')}</button>
             <button class="${s.pnlSwap ? 'on' : ''}" data-action="pnl-swap" data-v="1">${t('dirRedUp')}</button></div></div>
           <div class="divider"></div>
+          <div class="field"><label>${t('logoStyle')}</label><div class="logo-opts">${LOGO_STYLES.map(k => `<button class="logo-opt ${logoKey() === k ? 'on' : ''}" data-action="logo-style" data-v="${k}" title="${t('logo_' + k)}">
+              <span class="lo-img"><img src="${logoOf(k)}" alt=""></span><span class="lo-nm">${t('logo_' + k)}${k === 'C' ? `<em>${t('logoDefault')}</em>` : ''}</span></button>`).join('')}</div>
+            <div class="hint">${DB.meta.icon ? t('logoCustomOn') : t('logoStyleHint')}</div></div>
           <div class="field"><label>${t('customIcon')}</label><div class="icon-row">
-            <div class="brand-icon icon-preview ${DB.meta.icon ? 'custom' : 'bull'}"><img src="${DB.meta.icon ? esc(DB.meta.icon) : DEFAULT_LOGO}" alt=""></div>
+            <div class="brand-icon icon-preview ${DB.meta.icon ? 'custom' : 'bull'}"><img src="${esc(logoSrc())}" alt=""></div>
             <button class="btn btn-glass sm" data-action="pick-icon">${ic('upload')}${t('uploadIcon')}</button>
             ${DB.meta.icon ? `<button class="btn btn-danger sm" data-action="remove-icon">${t('removeIcon')}</button>` : ''}
           </div></div>
@@ -3256,6 +3271,7 @@
       setupAutoRefresh(); renderAll();
     },
     'pick-icon'() { $('#file-icon').click(); },
+    'logo-style'(el) { DB.meta.logo = el.dataset.v; commit(); renderAll(); },
     async 'pwa-install'() {
       if (!PWA.prompt) return;
       PWA.prompt.prompt();

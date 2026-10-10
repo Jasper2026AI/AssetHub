@@ -1020,3 +1020,15 @@ body.mobile .upd-bar{bottom:calc(84px + env(safe-area-inset-bottom))}
   .kpi .lbl .ico svg.i{width:13px;height:13px}
   .kpi .lbl .cal-mini{width:22px;height:22px;border-radius:8px}
 }
+
+/* ===== v5.8 图标样式选择 ===== */
+.logo-opts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.logo-opt{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px 8px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:#fff;cursor:pointer;font:inherit;transition:border-color .15s,background .15s}
+.logo-opt:hover{border-color:rgba(255,255,255,.22)}
+.logo-opt.on{border-color:var(--accent);background:var(--accent-soft)}
+.lo-img{width:44px;height:44px;display:grid;place-items:center}
+.lo-img img{width:100%;height:100%;object-fit:contain}
+.lo-nm{font-size:11.5px;color:var(--text-2);text-align:center;line-height:1.3}
+.logo-opt.on .lo-nm{color:#fff}
+.lo-nm em{display:block;font-style:normal;font-size:10px;color:var(--accent)}
+@media (max-width:620px){.logo-opts{grid-template-columns:repeat(3,minmax(0,1fr))}}
