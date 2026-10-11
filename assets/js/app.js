@@ -64,7 +64,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2273,7 +2273,7 @@
   /* ---- 账单明细：价格时间线 + 每期账单调整（只影响订阅统计，不动账户余额和到期时间） ---- */
   function openSubBills(s, keep) {
     const tk = todayKey();
-    const st = keep || { prices: JSON.parse(JSON.stringify(s.prices || [])), adj: JSON.parse(JSON.stringify(s.adj || {})), edit: null, show: 24 };
+    const st = keep || { prices: JSON.parse(JSON.stringify(s.prices || [])), adj: JSON.parse(JSON.stringify(s.adj || {})), edit: null, asc: false };
     if (!st.prices.length) st.prices = [{ from: s.start || tk, p: priceAt(s, s.start || tk) }];   // 没设置过：第一段 = 开始价格
     const cs = s.ccy, mny = v => money(v, { ccy: cs, max: 2, raw: true });
     openModal({
@@ -2281,7 +2281,9 @@
       body: `<div class="bl-head">${subIconHTML(s, 'lg')}<div id="bl-sum" class="bl-sum"></div></div>
         <div class="bl-sec"><div class="bl-h"><b>${ic('trend')}${t('subPriceTl')}</b><button type="button" class="btn btn-glass sm" id="bl-add">${ic('plus')}${t('subPriceAdd')}</button></div>
           <div id="bl-prices"></div><p class="hint">${t('subPriceTlHint')}</p></div>
-        <div class="bl-sec"><div class="bl-h"><b>${ic('receipt')}${t('subBillList')}</b><span class="dim">${t('subBillListHint')}</span></div>
+        <div class="bl-sec"><div class="bl-h"><b>${ic('receipt')}${t('subBillList')}</b>
+            <div class="seg sm" id="bl-order"><button type="button" data-v="desc" class="on">${t('subBillNewFirst')}</button><button type="button" data-v="asc">${t('subBillOldFirst')}</button></div></div>
+          <div class="bl-range" id="bl-range"></div>
           <div id="bl-list" class="bl-list"></div></div>`,
       footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" id="bl-save">${ic('check')}${t('save')}</button>`,
       onMount(m) {
@@ -2294,13 +2296,20 @@
             ${st.prices.length > 1 ? `<button type="button" class="icon-btn sm" data-del="${i}" title="${t('del')}">${ic('trash')}</button>` : '<span></span>'}</div>`).join('');
         };
         const drawList = () => {
-          const f = fake(), bills = subPays(f, true).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+          const f = fake(), bills = subPays(f, true).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) * (st.asc ? -1 : 1));
           const counted = bills.filter(b => b.tag !== 'skip'), tot = counted.reduce((a, b) => a + b.v, 0);
           const nAdj = bills.filter(b => b.tag).length;
           $('#bl-sum', m).innerHTML = `<div class="dim">${t('subColTotal')}</div><b class="num">${money(tot)}</b>
             <small>${t('subPayN', { n: counted.length })}${counted.length ? ` · ${t('subBillAvg', { v: money(tot / counted.length) })}` : ''}${nAdj ? ` · ${t('subBillAdjN', { n: nAdj })}` : ''}</small>`;
+          // 账单范围：从哪天到哪天、为什么在这里停（到期日 / 第一笔记账续费 / 今天）
+          const ds = bills.map(b => b.date).sort(), firstReal = bills.filter(b => b.real).map(b => b.date).sort()[0];
+          const why = [];
+          if (s.trialDays > 0 && s.cycle !== 'once') why.push(t('subBillWhyTrial', { d: billStart(s) }));
+          if (firstReal) why.push(t('subBillWhyRec', { d: firstReal }));
+          if (s.expire && s.expire <= tk) why.push(t('subBillWhyExp', { d: s.expire }));
+          $('#bl-range', m).innerHTML = ds.length ? `${ic('cal')}${t('subBillRange', { a: ds[0], b: ds[ds.length - 1], n: bills.length })}${why.length ? `<small>${why.join('；')}</small>` : ''}` : '';
           if (!bills.length) { $('#bl-list', m).innerHTML = `<div class="empty sm"><p>${t('subBillNone')}</p></div>`; return; }
-          const rows = bills.slice(0, st.show).map(b => {
+          const rows = bills.map(b => {
             if (b.real) return `<div class="bl-row real"><span class="num bl-d">${b.date}</span><span class="bl-tag rec">${t('subBillRec')}</span>
               <span class="num bl-a">${money(b.amt, { ccy: b.ccy, max: 2 })}</span><button type="button" class="icon-btn sm" data-tx="${b.id}" title="${t('subBillOpenTx')}">${ic('edit')}</button></div>`;
             const tag = b.tag === 'free' ? t('subBillFree') : b.tag === 'skip' ? t('subBillSkip') : b.tag === 'custom' ? t('subBillDisc') : t('subBillEst');
@@ -2316,16 +2325,16 @@
                 <input class="input" data-k="n" maxlength="40" placeholder="${t('subBillNotePh')}" value="${esc(a.n || '')}"></div>
               <div class="bl-ed-btns">${a.t ? `<button type="button" class="btn btn-glass sm" data-reset="${b.date}">${t('subBillReset')}</button>` : ''}<button type="button" class="btn btn-accent sm" data-ok="${b.date}">${ic('check')}${t('subBillApply')}</button></div></div>`;
           }).join('');
-          $('#bl-list', m).innerHTML = rows + (bills.length > st.show ? `<button type="button" class="btn btn-glass sm bl-more" id="bl-more">${t('loadMore')} (${bills.length - st.show})</button>` : '');
+          $('#bl-list', m).innerHTML = rows;
         };
         drawPrices(); drawList();
+        $('#bl-order', m).addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; st.asc = b.dataset.v === 'asc'; $$('#bl-order button', m).forEach(x => x.classList.toggle('on', x === b)); drawList(); });
         $('#bl-add', m).addEventListener('click', () => { const last = st.prices[st.prices.length - 1]; st.prices.push({ from: tk, p: last ? last.p : s.price }); drawPrices(); drawList(); });
         $('#bl-prices', m).addEventListener('input', e => { const i = +e.target.dataset.i; if (isNaN(i)) return; const f = e.target.dataset.f; st.prices[i][f] = f === 'p' ? (e.target.value.trim() === '' ? '' : parseNum(e.target.value)) : e.target.value; drawList(); });
         $('#bl-prices', m).addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (!b) return; st.prices.splice(+b.dataset.del, 1); drawPrices(); drawList(); });
         $('#bl-list', m).addEventListener('click', e => {
           const tx = e.target.closest('[data-tx]'); if (tx) { closeModal(); setTimeout(() => actions['edit-tx'](tx), 220); return; }
           const ed = e.target.closest('[data-edit]'); if (ed) { st.edit = st.edit === ed.dataset.edit ? null : ed.dataset.edit; drawList(); return; }
-          if (e.target.closest('#bl-more')) { st.show += 48; drawList(); return; }
           const box = e.target.closest('.bl-ed'); if (!box) return;
           const d = box.dataset.d, sg = e.target.closest('[data-k="t"] [data-v]');
           if (sg) { $$('[data-k="t"] button', box).forEach(x => x.classList.toggle('on', x === sg)); const inp = $('[data-k="amt"]', box); inp.disabled = sg.dataset.v !== 'custom'; if (inp.disabled) inp.value = '0'; return; }
