@@ -1118,3 +1118,20 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
   .price-row select.input{flex-basis:84px}
 }
 .sub-card .pm{white-space:nowrap}
+
+/* ===== v6.0 订阅：副名称 / 账号 / 网站 ===== */
+.alias-cell{max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub-alias{font-size:12px;color:var(--text-3);margin-top:1px}
+.info-ic{width:28px;height:28px;border-radius:9px;display:inline-grid;place-items:center;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:var(--text-2);cursor:pointer;transition:all .15s;vertical-align:middle}
+.info-ic svg.i{width:15px;height:15px}
+.info-ic:hover{color:var(--accent);background:var(--accent-soft);border-color:rgba(255,144,0,.35)}
+.sub-card .meta .info-ic{width:24px;height:24px;border-radius:8px;margin-left:2px}
+.sub-card .meta .info-ic svg.i{width:13px;height:13px}
+.popover.info-pop{width:min(320px,calc(100vw - 24px));padding:14px}
+.info-pop .ip-h{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:10px}
+.info-pop .ip-h svg.i{width:16px;height:16px;color:var(--accent)}
+.info-pop .ip-h span{margin-left:auto;color:var(--text-3);font-size:12px;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.info-pop .ip-v{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.06);word-break:break-all;user-select:all;color:#fff}
+.info-pop .ip-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.info-pop .ip-btns a{text-decoration:none}
+.field label svg.i{width:14px;height:14px;vertical-align:-2px;margin-right:4px;color:var(--text-3)}

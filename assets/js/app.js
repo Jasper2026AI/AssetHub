@@ -16,10 +16,10 @@
   /* ============ 1. 常量与配置 ============ */
   const STORE_KEY = 'assethub.data.v1';
   const LEGACY_KEYS = ['assetview.data.v1'];                      // 旧版本数据自动迁移
-  const DISPLAY_CCYS = ['USD', 'CNY', 'HKD', 'TWD'];
-  const CCY_SYM = { USD: '$', CNY: '¥', HKD: 'HK$', TWD: 'NT$', EUR: '€', JPY: 'JP¥', GBP: '£', KRW: '₩' };
-  const CCY_SHORT = { USD: 'USD', CNY: 'CNY', HKD: 'HKD', TWD: 'NTD' };
-  const FALLBACK_RATES = { USD: 1, CNY: 7.12, HKD: 7.78, TWD: 30.5, EUR: 0.86, JPY: 148, GBP: 0.75, SGD: 1.29, AUD: 1.52, CAD: 1.38, KRW: 1380 };
+  const DISPLAY_CCYS = ['USD', 'CNY', 'HKD', 'TWD', 'TRY'];
+  const CCY_SYM = { USD: '$', CNY: '¥', HKD: 'HK$', TWD: 'NT$', TRY: '₺', EUR: '€', JPY: 'JP¥', GBP: '£', KRW: '₩' };
+  const CCY_SHORT = { USD: 'USD', CNY: 'CNY', HKD: 'HKD', TWD: 'NTD', TRY: 'TRY' };
+  const FALLBACK_RATES = { USD: 1, CNY: 7.12, HKD: 7.78, TWD: 30.5, TRY: 42, EUR: 0.86, JPY: 148, GBP: 0.75, SGD: 1.29, AUD: 1.52, CAD: 1.38, KRW: 1380 };
   // 资产类别（可多选；第一个选中的为“主类别”，用于占比图，避免重复计算）
   const CLASSES = ['stock', 'crypto', 'gold', 'fund', 'cash', 'liability', 'physical', 'other'];
   const CLASS_COLOR = { stock: '#0A84FF', crypto: '#FF9000', gold: '#FFD60A', fund: '#30B0C7', cash: '#BF5AF2', liability: '#8E8E93', physical: '#AC8E68', other: '#5E5CE6' };
@@ -64,12 +64,16 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '5.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
 
   const ICON = {
+    user: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c.9-3.6 3.9-5.6 7.5-5.6s6.6 2 7.5 5.6"/>',
+    globe: '<circle cx="12" cy="12" r="8.8"/><path d="M3.4 12h17.2M12 3.2c2.4 2.5 3.6 5.4 3.6 8.8s-1.2 6.3-3.6 8.8c-2.4-2.5-3.6-5.4-3.6-8.8s1.2-6.3 3.6-8.8z"/>',
+    copy: '<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.6"/><path d="M15.5 8.5V6.6A2.6 2.6 0 0 0 12.9 4H6.6A2.6 2.6 0 0 0 4 6.6v6.3a2.6 2.6 0 0 0 2.6 2.6h1.9"/>',
+    ext: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
     repeat: '<path d="M17 3l3.5 3.5L17 10"/><path d="M4 11.5V10a3.5 3.5 0 0 1 3.5-3.5h13"/><path d="M7 21l-3.5-3.5L7 14"/><path d="M20 12.5V14a3.5 3.5 0 0 1-3.5 3.5h-13"/>',
     logo: '<path d="M4 17.5l5.2-6.2 4.1 3.6L20 6.5"/><path d="M15 6.5h5v5"/>',
     pie: '<path d="M21 12.5A9 9 0 1 1 11.5 3v9.5z"/><path d="M14.5 2.8A9 9 0 0 1 21.2 9.5h-6.7z"/>',
@@ -1941,11 +1945,11 @@
   /* ================= 页面：订阅明细 =================
      订阅只记录会员 / 订阅类支出：不计入总资产，也不参与投资盈亏。
      每个订阅的扣费 = 关联到它的记账支出（tx.subId）+ 第一笔关联支出之前，按开始时间和周期推算的账单 */
-  const SUB_CATS = ['vps', 'ai', 'domain', 'media', 'software'];
-  const SUB_CAT_COLOR = { vps: '#0A84FF', ai: '#BF5AF2', domain: '#30D158', media: '#FF375F', software: '#64D2FF', '': '#8E8E93' };
-  const SUB_EXTRA_COLORS = ['#FF9F0A', '#FFD60A', '#5E5CE6', '#66D4CF', '#AC8E68', '#FF6482', '#32ADE6'];
+  const SUB_CATS = ['vps', 'ai', 'domain', 'media', 'software', 'cloud'];
+  const SUB_CAT_COLOR = { vps: '#0A84FF', ai: '#BF5AF2', domain: '#30D158', media: '#FF375F', software: '#64D2FF', cloud: '#FF9F0A', '': '#8E8E93' };
+  const SUB_EXTRA_COLORS = ['#FFD60A', '#FF6B3D', '#5E5CE6', '#66D4CF', '#AC8E68', '#FF6482', '#32ADE6'];
   const SUB_CYCLES = ['month', 'quarter', 'year', 'once', 'custom'];
-  const SUB_FIELDS = ['name', 'cat', 'price', 'ccy', 'cycle', 'cycleN', 'cycleU', 'start', 'trialDays', 'expire', 'payId', 'remind', 'nextPrice', 'note', 'locked', 'icon'];
+  const SUB_FIELDS = ['name', 'alias', 'account', 'site', 'cat', 'price', 'ccy', 'cycle', 'cycleN', 'cycleU', 'start', 'trialDays', 'expire', 'payId', 'remind', 'nextPrice', 'note', 'locked', 'icon'];
   const SUB_PERIODS = ['today', 'month', 'year', 'total'];
   const subCatColor = c => (SUB_CAT_COLOR[c] != null ? SUB_CAT_COLOR[c] : SUB_EXTRA_COLORS[[...String(c)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % SUB_EXTRA_COLORS.length]);
   const subCatName = c => (!c ? t('subCatNone') : SUB_CATS.includes(c) ? t('subCat_' + c) : c);
@@ -2001,6 +2005,7 @@
   /** 状态：试用中 / 无限期 / 已过期 / 快到期 / 正常 */
   function subState(s) {
     const tk = todayKey();
+    if (s.cycle === 'once') return 'forever';
     if (+s.trialDays > 0 && s.start && tk >= s.start && tk < billStart(s)) return 'trial';
     if (!s.expire) return 'forever';
     const d = daysTo(s.expire);
@@ -2015,6 +2020,7 @@
   }
   const subCatTag = c => `<span class="tag" style="--tc:${subCatColor(c || '')}">${esc(subCatName(c))}</span>`;
   function expireHTML(s, inline) {
+    if (s.cycle === 'once') return `<span class="exp-b forever">${t('subBuyout')}</span>`;
     const st = subState(s);
     if (!s.expire) return `<span class="exp-b forever">${t('subForever')}</span>`;
     const d = daysTo(s.expire);
@@ -2055,7 +2061,7 @@
     const U = UI.sub, q = U.q.trim().toLowerCase();
     let list = DB.subs.map(s => ({ s, total: subTotal(s), pm: conv(perMonth(s), s.ccy), cyc: conv(+s.price || 0, s.ccy) }));
     list = list.filter(x => U.cat === 'all' || (x.s.cat || '') === U.cat);
-    if (q) list = list.filter(x => [x.s.name, subCatName(x.s.cat), x.s.note, x.s.payId ? acctName(x.s.payId) : ''].some(v => String(v || '').toLowerCase().includes(q)));
+    if (q) list = list.filter(x => [x.s.name, x.s.alias, subCatName(x.s.cat), x.s.note, x.s.payId ? acctName(x.s.payId) : ''].some(v => String(v || '').toLowerCase().includes(q)));
     const pv = x => (U.pmode === 'month' ? (x.s.cycle === 'once' ? 0 : x.pm) : x.cyc), ex = x => x.s.expire || '9999-12-31';
     const cmp = {
       expireAsc: (a, b) => (ex(a) < ex(b) ? -1 : ex(a) > ex(b) ? 1 : 0), expireDesc: (a, b) => (ex(a) < ex(b) ? 1 : ex(a) > ex(b) ? -1 : 0),
@@ -2169,8 +2175,9 @@
       main = `${money(x.pm, { max: 2 })}<span class="per">/${t('cycS_month')}</span>`;
       small = `${money(+s.price || 0, { ccy: s.ccy, max: 2 })}/${cycleShort(s)}`;
     } else {
-      main = `${money(x.cyc, { max: 2 })}<span class="per">/${cycleShort(s)}</span>`;
+      main = s.cycle === 'once' ? money(x.cyc, { max: 2 }) : `${money(x.cyc, { max: 2 })}<span class="per">/${cycleShort(s)}</span>`;
       if (orig) small = `${money(+s.price || 0, { ccy: s.ccy, max: 2 })}`;
+      else if (s.cycle === 'once') small = t('subBuyout');
       else if (s.cycle !== 'month' && s.cycle !== 'once') small = `≈ ${money(x.pm, { max: 2 })}/${t('cycS_month')}`;
     }
     const up = s.nextPrice != null && s.nextPrice !== '' ? `<span class="np-b" title="${t('subNextTip')}">${ic('trend')}${t('subNext')} ${money(+s.nextPrice, { ccy: s.ccy, max: 2 })}</span>` : '';
@@ -2181,7 +2188,9 @@
     renderBatchBar('sub', rows.map(r => r.s.id));
     const ops = s => `<div class="ops icon-ops">${histBtn('sub', s.id)}<button class="op upd" data-action="sub-price" data-id="${s.id}" title="${t('subPriceUp')}">${ic('trend')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}" title="${t('del')}">${ic('trash')}</button></div>`;
     const payTxt = s => (s.payId ? `${esc(acctName(s.payId))}${acctWh(s.payId) ? `<small class="wh-sm">${ic('db')}${esc(acctWh(s.payId))}</small>` : ''}` : '<span class="dim">—</span>');
-    const trial = s => (+s.trialDays > 0 ? `<span class="trial-b ${subState(s) === 'trial' ? 'on' : ''}">${t('subTrialN', { n: s.trialDays })}</span>` : '');
+    const trial = s => (+s.trialDays > 0 && s.cycle !== 'once' ? `<span class="trial-b ${subState(s) === 'trial' ? 'on' : ''}">${t('subTrialN', { n: s.trialDays })}</span>` : '');
+    // 账号 / 网站：只显示图标，点开才显示内容
+    const infoBtn = (s, k) => (s[k] ? `<button class="info-ic" data-action="sub-info" data-k="${k}" data-id="${s.id}" title="${t(k === 'account' ? 'subAccountShow' : 'subSiteShow')}">${ic(k === 'account' ? 'user' : 'globe')}</button>` : '<span class="dim">—</span>');
     let body;
     if (!DB.subs.length) body = `<div class="card glass"><div class="empty"><div class="em">🔁</div><h4>${t('subEmpty')}</h4><p>${t('subEmptySub')}</p><div class="btns"><button class="btn btn-accent sm" data-action="add-sub">${ic('plus')}${t('subAdd')}</button></div></div></div>`;
     else if (!rows.length) body = `<div class="card glass">${emptyState('nomatch')}</div>`;
@@ -2190,7 +2199,7 @@
         <div class="hc-top">
           ${U.batch ? `<label class="ck"><input type="checkbox" data-sel="sub" value="${s.id}" ${U.sel.has(s.id) ? 'checked' : ''}><i></i></label>` : ''}
           ${subIconHTML(s)}
-          <div style="flex:1;min-width:0"><div class="nm">${esc(s.name)}${s.locked ? ic('lock', 'lk') : ''}</div><div class="meta">${subCatTag(s.cat)}${trial(s)}</div></div>
+          <div style="flex:1;min-width:0"><div class="nm">${esc(s.name)}${s.locked ? ic('lock', 'lk') : ''}</div>${s.alias ? `<div class="sub-alias">${esc(s.alias)}</div>` : ''}<div class="meta">${subCatTag(s.cat)}${trial(s)}${s.account ? infoBtn(s, 'account') : ''}${s.site ? infoBtn(s, 'site') : ''}</div></div>
           <div class="r"><div class="v num">${subPriceCell(x, true)}</div><div class="p">${expireHTML(s, true)}</div></div></div>
         <div class="hc-grid">
           <div><div class="l">${t('subColTotal')}</div><div class="x num">${money(x.total)}</div></div>
@@ -2208,11 +2217,14 @@
         return `<tr class="${U.sel.has(s.id) ? 'sel' : ''} st-${subState(s)}">
           ${U.batch ? `<td class="ckc"><label class="ck"><input type="checkbox" data-sel="sub" value="${s.id}" ${U.sel.has(s.id) ? 'checked' : ''}><i></i></label></td>` : ''}
           <td><div class="sub-name">${subIconHTML(s)}<div><div class="nmcell"><b>${esc(s.name)}</b>${s.locked ? ic('lock', 'lk') : ''}${trial(s)}</div>${s.note ? `<small>${esc(s.note)}</small>` : ''}</div></div></td>
+          <td class="muted alias-cell">${s.alias ? esc(s.alias) : '<span class="dim">—</span>'}</td>
+          <td class="c">${infoBtn(s, 'account')}</td>
+          <td class="c">${infoBtn(s, 'site')}</td>
           <td>${subCatTag(s.cat)}</td>
           <td class="c"><span class="cyc-b">${esc(cycleLabel(s))}</span></td>
           <td class="r num strong">${subPriceCell(x)}</td>
           <td class="muted">${payTxt(s)}</td>
-          <td class="num">${s.start || '—'}${s.trialDays > 0 ? `<small>${t('subBillFrom', { d: billStart(s) })}</small>` : ''}</td>
+          <td class="num">${s.start || '—'}${s.cycle === 'once' ? `<small>${t('subBuyDate')}</small>` : s.trialDays > 0 ? `<small>${t('subBillFrom', { d: billStart(s) })}</small>` : ''}</td>
           <td class="num exp-cell">${expireHTML(s)}</td>
           <td class="c">${+s.remind ? `<span class="rm-b">${ic('clock')}${t('subRemindN', { n: s.remind })}</span>` : '<span class="dim">—</span>'}</td>
           <td class="r num strong">${money(x.total)}<small>${t('subPayN', { n: subPays(s).length })}</small></td>
@@ -2220,15 +2232,44 @@
       }).join('');
       body = `<div class="card glass table-card"><div class="table-wrap"><table class="tbl sub-tbl">
         <thead><tr>${U.batch ? `<th class="ckc"><label class="ck"><input type="checkbox" data-sel-all="sub" ${allSel ? 'checked' : ''}><i></i></label></th>` : ''}
-          <th>${t('subColName')}</th><th>${t('subColCat')}</th><th class="c">${t('subColCycle')}</th>${head('price', U.pmode === 'month' ? t('subColPriceM') : t('subColPrice'))}
+          <th>${t('subColName')}</th><th>${t('subColAlias')}</th><th class="c">${t('subColAccount')}</th><th class="c">${t('subColSite')}</th><th>${t('subColCat')}</th><th class="c">${t('subColCycle')}</th>${head('price', U.pmode === 'month' ? t('subColPriceM') : t('subColPrice'))}
           <th>${t('subColPay')}</th><th>${t('subColStart')}</th>${head('expire', t('subColExpire'))}<th class="c">${t('subColRemind')}</th>${head('total', t('subColTotal'))}<th class="c">${t('colOps')}</th></tr></thead>
         <tbody>${tr}</tbody>
-        <tfoot><tr>${U.batch ? '<td></td>' : ''}<td colspan="4">${t('total')} · ${t('subNSubs', { n: rows.length })}</td><td class="r num">${money(sumM)}<small>${t('subPerMonthSum')}</small></td><td colspan="4"></td><td class="r num">${money(sumT)}</td><td></td></tr></tfoot>
+        <tfoot><tr>${U.batch ? '<td></td>' : ''}<td colspan="6">${t('total')} · ${t('subNSubs', { n: rows.length })}</td><td class="r num">${money(sumM)}<small>${t('subPerMonthSum')}</small></td><td colspan="4"></td><td class="r num">${money(sumT)}</td><td></td></tr></tfoot>
       </table></div></div>`;
     }
     $('#sub-body').innerHTML = body;
   }
 
+  /** 账号 / 网站：点击图标后弹出显示，可复制、打开网站 */
+  function openSubInfo(anchor, s, k) {
+    if (popEl) { const same = popEl.dataset.for === s.id + k; closePopover(); if (same) return; }
+    const v = s[k] || '';
+    const pop = document.createElement('div');
+    pop.className = 'popover info-pop'; pop.dataset.for = s.id + k;
+    pop.innerHTML = `<div class="ip-h">${ic(k === 'account' ? 'user' : 'globe')}<b>${t(k === 'account' ? 'subAccount' : 'subSite')}</b><span>${esc(s.name)}</span></div>
+      <div class="ip-v">${esc(v)}</div>
+      <div class="ip-btns"><button class="btn btn-glass sm" data-ip="copy">${ic('copy')}${t('copy')}</button>${k === 'site' ? `<a class="btn btn-accent sm" href="${esc(v)}" target="_blank" rel="noopener noreferrer">${ic('ext')}${t('subOpenSite')}</a>` : ''}</div>`;
+    document.body.appendChild(pop);
+    const r = anchor.getBoundingClientRect(), w = pop.offsetWidth;
+    pop.style.left = Math.max(12, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 12)) + window.scrollX + 'px';
+    pop.style.top = r.bottom + 8 + window.scrollY + 'px';
+    pop.addEventListener('click', e => {
+      if (!e.target.closest('[data-ip="copy"]')) { if (e.target.closest('a')) setTimeout(closePopover, 50); return; }
+      const done = () => toast(t('copied'), 'ok');
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(done, () => fallbackCopy(v) && done());
+      else if (fallbackCopy(v)) done();
+    });
+    popEl = pop;
+    popOutside = ev => { if (!pop.contains(ev.target) && !anchor.contains(ev.target)) closePopover(); };
+    setTimeout(() => document.addEventListener('pointerdown', popOutside, true), 0);
+  }
+  function fallbackCopy(v) {
+    const ta = document.createElement('textarea'); ta.value = v; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove(); return ok;
+  }
   /* ---- 新增 / 编辑订阅 ---- */
   function subCatOptions(sel) {
     const list = subCats();
@@ -2236,9 +2277,9 @@
   }
   function openSubModal(id) {
     const ex = id ? findSub(id) : null;
-    const st = ex ? JSON.parse(JSON.stringify(ex)) : { name: '', cat: '', price: '', ccy: S().ccy, cycle: 'month', cycleN: 1, cycleU: 'month', start: todayKey(), trialDays: '', expire: '', payId: '', remind: 3, nextPrice: null, note: '', icon: '' };
+    const st = ex ? JSON.parse(JSON.stringify(ex)) : { name: '', alias: '', account: '', site: '', cat: '', price: '', ccy: S().ccy, cycle: 'month', cycleN: 1, cycleU: 'month', start: todayKey(), trialDays: '', expire: '', payId: '', remind: 3, nextPrice: null, note: '', icon: '' };
     let expTouched = !!ex;
-    const ccyOpts = c => txCcyList(c).map(x => `<option value="${x}" ${x === c ? 'selected' : ''}>${CCY_SHORT[x] || x}</option>`).join('');
+    const ccyOpts = c => txCcyList(c).map(x => `<option value="${x}" ${x === c ? 'selected' : ''}>${CCY_SHORT[x] || x}</option>`).join('') + `<option value="__other">${t('ccy_OTHER')}…</option>`;
     const body = `
       <div class="sub-form-top">
         <button type="button" class="sub-ic-pick" id="sf-icon" title="${t('subIconPick')}">${st.icon ? `<img src="${esc(st.icon)}" alt="">` : `<span>${ic('upload')}<small>${t('subIcon')}</small></span>`}</button>
@@ -2247,25 +2288,31 @@
           <div class="sub-ic-tools"><button type="button" class="link" id="sf-icon-btn">${t('subIconPick')}</button><button type="button" class="link dim" id="sf-icon-rm" style="${st.icon ? '' : 'display:none'}">${t('removeIcon')}</button><span class="dim">· ${t('subIconHint')}</span></div>
         </div>
       </div>
+      <div class="field"><label>${t('subColAlias')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="sf-alias" value="${esc(st.alias || '')}" maxlength="40" placeholder="${t('subAliasPh')}"></div>
+      <div class="row2">
+        <div class="field"><label>${ic('user')}${t('subAccount')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="sf-account" value="${esc(st.account || '')}" maxlength="120" autocomplete="off" spellcheck="false" placeholder="${t('subAccountPh')}"></div>
+        <div class="field"><label>${ic('globe')}${t('subSite')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="sf-site" value="${esc(st.site || '')}" maxlength="300" autocomplete="off" spellcheck="false" inputmode="url" placeholder="${t('subSitePh')}"></div>
+      </div>
       <div class="row2">
         <div class="field"><label>${t('subColCat')} <span class="dim">· ${t('codeOpt')}</span></label><select class="input" id="sf-cat">${subCatOptions(st.cat)}</select>
           <input class="input" id="sf-cat-c" maxlength="20" placeholder="${t('subCatCustomPh')}" style="display:none;margin-top:8px"></div>
-        <div class="field"><label>${t('subPrice')}</label><div class="price-row"><input class="input num" id="sf-price" inputmode="decimal" value="${st.price !== '' ? esc(trim8(st.price)) : ''}" placeholder="0.00"><select class="input" id="sf-ccy">${ccyOpts(st.ccy)}</select></div></div>
+        <div class="field"><label>${t('subPrice')}</label><div class="price-row"><input class="input num" id="sf-price" inputmode="decimal" value="${st.price !== '' ? esc(trim8(st.price)) : ''}" placeholder="0.00"><select class="input" id="sf-ccy">${ccyOpts(st.ccy)}</select></div>
+          <input class="input" id="sf-ccy-o" maxlength="5" placeholder="${t('ccyOtherPh')}" style="display:none;margin-top:8px;text-transform:uppercase"><div class="hint" id="sf-ccy-h"></div></div>
       </div>
       <div class="field"><label>${t('subColCycle')}</label><div class="seg seg-full seg-wrap" id="sf-cycle">${SUB_CYCLES.map(c => `<button type="button" data-v="${c}" class="${st.cycle === c ? 'on' : ''}">${t('cyc_' + c)}</button>`).join('')}</div>
         <div class="cyc-custom" id="sf-cyc-c" style="${st.cycle === 'custom' ? '' : 'display:none'}">${t('cycEveryPre')}<input class="input num" id="sf-cn" inputmode="numeric" value="${esc(st.cycleN || 1)}"><select class="input" id="sf-cu">${['day', 'month', 'year'].map(u => `<option value="${u}" ${st.cycleU === u ? 'selected' : ''}>${t('unitD_' + u)}</option>`).join('')}</select></div></div>
       <div class="row2">
-        <div class="field"><label>${t('subColStart')}</label><input class="input" type="date" id="sf-start" value="${esc(st.start || '')}"></div>
-        <div class="field"><label>${t('subTrial')} <span class="dim">· ${t('codeOpt')}</span></label><div class="price-row"><input class="input num" id="sf-trial" inputmode="numeric" value="${st.trialDays ? esc(st.trialDays) : ''}" placeholder="0"><span class="unit-txt">${t('unitD_day')}</span></div></div>
+        <div class="field"><label id="sf-start-l">${t('subColStart')}</label><input class="input" type="date" id="sf-start" value="${esc(st.start || '')}"></div>
+        <div class="field" id="sf-trial-f"><label>${t('subTrial')} <span class="dim">· ${t('codeOpt')}</span></label><div class="price-row"><input class="input num" id="sf-trial" inputmode="numeric" value="${st.trialDays ? esc(st.trialDays) : ''}" placeholder="0"><span class="unit-txt">${t('unitD_day')}</span></div></div>
       </div>
-      <div class="field"><label>${t('subColExpire')}</label><div class="price-row">
+      <div class="field" id="sf-exp-f"><label>${t('subColExpire')}</label><div class="price-row">
         <input class="input" type="date" id="sf-expire" value="${esc(st.expire || '')}" ${st.expire || !ex ? '' : 'disabled'}>
         <label class="switch-inline"><input type="checkbox" id="sf-forever" ${ex && !ex.expire ? 'checked' : ''}><span>${t('subForever')}</span></label>
         <button type="button" class="btn btn-glass sm" id="sf-auto">${ic('refresh')}${t('subAutoExp')}</button></div>
         <div class="hint" id="sf-exp-hint"></div></div>
       <div class="row2">
         <div class="field"><label>${t('subColPay')} <span class="dim">· ${t('codeOpt')}</span></label><select class="input" id="sf-pay">${balOptions(st.payId || '', t('subPayNone'))}</select></div>
-        <div class="field"><label>${t('subColRemind')}</label><div class="seg seg-full" id="sf-remind">${[0, 1, 3, 7].map(n => `<button type="button" data-v="${n}" class="${+st.remind === n ? 'on' : ''}">${n ? t('subRemindB', { n }) : t('subRemind0')}</button>`).join('')}</div></div>
+        <div class="field" id="sf-remind-f"><label>${t('subColRemind')}</label><div class="seg seg-full" id="sf-remind">${[0, 1, 3, 7].map(n => `<button type="button" data-v="${n}" class="${+st.remind === n ? 'on' : ''}">${n ? t('subRemindB', { n }) : t('subRemind0')}</button>`).join('')}</div></div>
       </div>
       <div class="field" style="margin-bottom:4px"><label>${t('noteOpt')}</label><input class="input" id="sf-note" maxlength="120" value="${esc(st.note || '')}" placeholder="${t('notePh')}"></div>
       <div class="sub-preview" id="sf-preview"></div>`;
@@ -2277,7 +2324,7 @@
         const read = () => ({
           cycle: st.cycle, cycleN: Math.max(1, parseInt($('#sf-cn', m).value, 10) || 1), cycleU: $('#sf-cu', m).value,
           start: $('#sf-start', m).value, trialDays: Math.max(0, parseInt($('#sf-trial', m).value, 10) || 0),
-          price: parseNum($('#sf-price', m).value), ccy: $('#sf-ccy', m).value
+          price: parseNum($('#sf-price', m).value), ccy: $('#sf-ccy', m).value === '__other' ? $('#sf-ccy-o', m).value.trim().toUpperCase() : $('#sf-ccy', m).value
         });
         /** 自动到期日：从计费开始日按周期往后推，直到超过今天（一次性 = 无限期） */
         const autoExp = () => {
@@ -2289,11 +2336,20 @@
           return d;
         };
         const preview = () => {
-          const r = read(), forever = $('#sf-forever', m).checked;
+          const r = read(), forever = $('#sf-forever', m).checked, buy = r.cycle === 'once';
+          // 买断：只填购买时间（没有试用期和过期时间）
+          $('#sf-start-l', m).textContent = buy ? t('subBuyDate') : t('subColStart');
+          $('#sf-trial-f', m).style.visibility = buy ? 'hidden' : '';
+          $('#sf-exp-f', m).style.display = buy ? 'none' : '';
+          $('#sf-remind-f', m).style.visibility = buy ? 'hidden' : '';
+          const oc = $('#sf-ccy', m).value === '__other';
+          $('#sf-ccy-o', m).style.display = oc ? '' : 'none';
+          $('#sf-ccy-h', m).textContent = oc && r.ccy ? (validCcy(r.ccy) ? t('ccyRateOk', { c: r.ccy, v: fmtNum(rateOf(r.ccy), 0, 4) }) : t('errRate', { c: r.ccy })) : '';
           $('#sf-expire', m).disabled = forever;
           if (!expTouched && !forever) { const a = autoExp(); $('#sf-expire', m).value = a; if (!a) { $('#sf-forever', m).checked = true; $('#sf-expire', m).disabled = true; } }
-          const fake = Object.assign({ id: '__p' }, r, { expire: $('#sf-forever', m).checked ? '' : $('#sf-expire', m).value, priceHist: ex ? ex.priceHist : null });
+          const fake = Object.assign({ id: '__p' }, r, { expire: buy || $('#sf-forever', m).checked ? '' : $('#sf-expire', m).value, trialDays: buy ? 0 : r.trialDays, priceHist: ex ? ex.priceHist : null });
           if (isNaN(fake.price)) fake.price = 0;
+          if (!validCcy(fake.ccy)) fake.ccy = S().ccy;
           const pays = ex ? subPays(Object.assign({}, fake, { id: ex.id })) : subPays(fake);
           const tot = pays.reduce((a, p) => a + p.v, 0);
           $('#sf-exp-hint', m).textContent = r.trialDays > 0 && r.start ? t('subBillFrom', { d: billStart(r) }) : '';
@@ -2311,6 +2367,8 @@
         $('#sf-cat', m).addEventListener('change', e => { const c = e.target.value === '__custom'; $('#sf-cat-c', m).style.display = c ? '' : 'none'; if (c) $('#sf-cat-c', m).focus(); });
         ['#sf-price', '#sf-cn', '#sf-start', '#sf-trial'].forEach(q => $(q, m).addEventListener('input', preview));
         ['#sf-cu', '#sf-ccy'].forEach(q => $(q, m).addEventListener('change', preview));
+        $('#sf-ccy-o', m).addEventListener('input', preview);
+        $('#sf-ccy', m).addEventListener('change', e => { if (e.target.value === '__other') setTimeout(() => $('#sf-ccy-o', m).focus(), 20); });
         $('#sf-expire', m).addEventListener('input', () => { expTouched = true; preview(); });
         $('#sf-forever', m).addEventListener('change', () => { expTouched = true; preview(); });
         $('#sf-auto', m).addEventListener('click', () => { expTouched = false; $('#sf-forever', m).checked = false; preview(); });
@@ -2328,8 +2386,11 @@
           if (!r.start) { toast(t('errDate'), 'err'); return; }
           let cat = $('#sf-cat', m).value;
           if (cat === '__custom') { cat = $('#sf-cat-c', m).value.trim(); if (!cat) { toast(t('subErrCat'), 'err'); $('#sf-cat-c', m).focus(); return; } }
-          const forever = $('#sf-forever', m).checked, expire = forever ? '' : $('#sf-expire', m).value;
-          const rec = { name, cat, price: round8(r.price), ccy: r.ccy, cycle: r.cycle, cycleN: r.cycle === 'custom' ? r.cycleN : 1, cycleU: r.cycle === 'custom' ? r.cycleU : 'month',
+          const buy = r.cycle === 'once', forever = buy || $('#sf-forever', m).checked, expire = forever ? '' : $('#sf-expire', m).value;
+          if (buy) { r.trialDays = 0; st.remind = 0; }   // 买断：没有试用期、过期时间和提醒
+          let site = $('#sf-site', m).value.trim();
+          if (site && !/^[a-z][a-z0-9+.-]*:\/\//i.test(site)) site = 'https://' + site;   // 没写 http(s):// 自动补上
+          const rec = { name, alias: $('#sf-alias', m).value.trim(), account: $('#sf-account', m).value.trim(), site, cat, price: round8(r.price), ccy: r.ccy, cycle: r.cycle, cycleN: r.cycle === 'custom' ? r.cycleN : 1, cycleU: r.cycle === 'custom' ? r.cycleU : 'month',
             start: r.start, trialDays: r.trialDays, expire, payId: $('#sf-pay', m).value || '', remind: +st.remind || 0, note: $('#sf-note', m).value.trim(), icon: st.icon || '' };
           if (ex) {
             if (ex.price !== rec.price) rec.priceHist = [];   // 手动改价格视为更正：之前的推算账单也按新价格
@@ -3354,6 +3415,7 @@
       if (f === 'expire' && (v === '' || v == null)) return esc(t('subForever'));
       if (v === '' || v == null) return '<span class="dim">∅</span>';
       if (f === 'cat') return esc(subCatName(v));
+      if (f === 'account') { const a = String(v); return esc(a.length > 4 ? a.slice(0, 2) + '•••' + a.slice(-2) : '•••'); }   // 记录里不显示完整账号
       if (f === 'cycle') return esc(t('cyc_' + v));
       if (f === 'cycleU') return esc(t('unitD_' + v));
       if (f === 'payId') { const a = findAsset(v); return esc(a ? a.name : t('deletedAccount')); }
@@ -3679,13 +3741,15 @@
     };
     const subs = [
       // 开始日错开，扣费分散在每个月的不同日子
-      mkSub('ChatGPT Plus', 'ai', 20, 'USD', 'month', addDate(addDate(tk, -19, 'month'), -6, 'day'), chase),
-      mkSub('Claude Pro', 'ai', 20, 'USD', 'month', addDate(soon, -8, 'month'), chase, { expire: soon }),
-      mkSub(N('Vultr 云服务器', 'Vultr VPS'), 'vps', 6, 'USD', 'month', addDate(addDate(tk, -23, 'month'), -17, 'day'), chase, { note: N('东京 1C1G', 'Tokyo 1C1G') }),
+      mkSub('ChatGPT Plus', 'ai', 20, 'USD', 'month', addDate(addDate(tk, -19, 'month'), -6, 'day'), chase, { alias: 'OpenAI', account: 'jasper@example.com', site: 'https://chatgpt.com/' }),
+      mkSub('Claude Pro', 'ai', 20, 'USD', 'month', addDate(soon, -8, 'month'), chase, { expire: soon, alias: 'Anthropic', account: 'jasper@example.com', site: 'https://claude.ai/settings/billing' }),
+      mkSub(N('Vultr 云服务器', 'Vultr VPS'), 'vps', 6, 'USD', 'month', addDate(addDate(tk, -23, 'month'), -17, 'day'), chase, { note: N('东京 1C1G', 'Tokyo 1C1G'), alias: 'Tokyo', site: 'https://my.vultr.com/billing/' }),
       mkSub(N('搬瓦工 VPS', 'BandwagonHost VPS'), 'vps', 49.99, 'USD', 'year', addDate(addDate(tk, -16, 'month'), 9, 'day'), chase, { remind: 7 }),
       mkSub('jasper.dev', 'domain', 12.98, 'USD', 'year', addDate(addDate(tk, -32, 'month'), -3, 'day'), chase, { remind: 7 }),
-      mkSub('Netflix', 'media', 15.49, 'USD', 'month', addDate(addDate(tk, -14, 'month'), -9, 'day'), chase, { nextPrice: 17.99 }),
-      mkSub(N('iCloud+ 200GB', 'iCloud+ 200GB'), 'software', 21, 'CNY', 'month', addDate(addDate(tk, -26, 'month'), -1, 'day'), cmb, { remind: 0 }),
+      mkSub('Netflix', 'media', 15.49, 'USD', 'month', addDate(addDate(tk, -14, 'month'), -9, 'day'), chase, { nextPrice: 17.99, alias: N('标准方案', 'Standard'), account: 'family@example.com', site: 'https://www.netflix.com/account' }),
+      mkSub('YouTube Premium', 'media', 129.99, 'TRY', 'month', addDate(addDate(tk, -7, 'month'), -12, 'day'), chase, { alias: N('土耳其区', 'Turkey'), site: 'https://www.youtube.com/paid_memberships' }),
+      mkSub(N('iCloud+ 200GB', 'iCloud+ 200GB'), 'cloud', 21, 'CNY', 'month', addDate(addDate(tk, -26, 'month'), -1, 'day'), cmb, { remind: 0 }),
+      mkSub('Final Cut Pro', 'software', 299.99, 'USD', 'once', addDate(tk, -20, 'month'), chase, { alias: 'Apple', remind: 0 }),
       mkSub('Notion Plus', 'software', 96, 'USD', 'year', addDate(tk, -4, 'day'), chase, { trialDays: 14 }),
       mkSub(N('1Password 家庭版', '1Password Families'), N('密码管理', 'Passwords'), 59.88, 'USD', 'year', addDate(tk, -9, 'month'), chase, { remind: 7 })
     ];
@@ -3787,6 +3851,7 @@
       openSubPrice(s);
     },
     'sub-period'(el) { UI.sub.period = el.dataset.v; renderSubs(); },
+    'sub-info'(el) { const s = findSub(el.dataset.id); if (s) openSubInfo(el, s, el.dataset.k); },
     'sub-cat'(el) { UI.sub.cat = UI.sub.cat === el.dataset.v && el.classList.contains('legend-row') ? 'all' : el.dataset.v; renderSubs(); },
     'sub-pmode'(el) { UI.sub.pmode = el.dataset.v; renderSubs(); },
     'sub-batch'() { UI.sub.batch = !UI.sub.batch; UI.sub.sel.clear(); renderSubs(); },
