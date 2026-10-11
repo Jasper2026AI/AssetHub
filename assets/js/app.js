@@ -64,7 +64,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -349,17 +349,25 @@
     const obj = JSON.parse(text);
     if (!isEnc(obj)) return obj;
     if (S().syncKey) { try { return JSON.parse(await decryptWith(S().syncKey, obj)); } catch (e) { /* 密钥不对 */ } }
-    // 云端还是本机改密码之前的旧密码加密的：用本机记住的旧密钥解开，然后用新密码重新加密上传
-    // （仅当本机改密码的时间比云端加密时用的密码更新时才这么做，否则说明是别的设备后来改了密码，要用新密码）
-    if (opt.old || (S().passChangedAt || 0) > (obj.pc || 0)) for (const pk of (S().syncKeyPrev || [])) {
+    // 云端还是用本机以前的密码加密的：用本机记住的旧密钥解开，之后用现在的密码重新加密上传
+    for (const pk of (S().syncKeyPrev || [])) {
       try { const d = JSON.parse(await decryptWith(pk, obj)); if (!opt.old) SYNC.reenc = true; return d; } catch (e) { /* 继续 */ }
     }
     if (!opt.interactive) throw new Error('NEED_PASS');
+    const pcTxt = obj.pc ? '<br><span class="dim">' + t('cloudPassPc', { d: fullTime(obj.pc) }) + '</span>' : '';
     for (let i = 0; i < 3; i++) {
-      const r = await passDialog(t('cloudPassT'), i ? t('passWrongRetry') : t(opt.old ? 'cloudPassOldM' : 'cloudPassM'), ['cur']);
+      const r = await passDialog(t('cloudPassT'), (i ? t('passWrongRetry') : t(opt.old ? 'cloudPassOldM' : 'cloudPassM')) + pcTxt, ['cur']);
       if (!r) throw new Error('CANCEL');
       let raw, data;
-      try { raw = await deriveKeyRaw(r.cur, obj.salt, obj.iter); data = JSON.parse(await decryptWith(raw, obj)); } catch (e) { continue; }
+      try { raw = await deriveKeyRaw(r.cur, obj.salt, obj.iter); data = JSON.parse(await decryptWith(raw, obj)); }
+      catch (e) {
+        // 输入的是本机锁定密码却解不开：云端是用另一个密码加密的，说明原因并给出“用本机覆盖云端”的办法
+        if (!opt.old && opt.allowForce && S().passHash && (await hashPass(r.cur)) === S().passHash) {
+          const force = await confirmDialog({ title: t('cloudOtherPassT'), msg: t('cloudOtherPassM', { d: obj.pc ? fullTime(obj.pc) : '—' }), ok: t('cloudForcePush'), cancel: t('cloudTryOther'), danger: true, noBackdrop: true });
+          if (force) throw new Error('FORCE_PUSH');
+        }
+        continue;
+      }
       if (!opt.old) {
         const h = await hashPass(r.cur);
         if (!S().passHash || S().passHash === h) {                    // 新设备 / 密码本来就一样：直接采用
@@ -521,7 +529,7 @@
         if (!opt.silent) toast(t('syncPushed'), 'ok');
       } else {
         SYNC.phase = 'pull';
-        const cloud = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: inter });
+        const cloud = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: inter, allowForce: true });
         if (!validData(cloud)) throw new Error('BAD_DATA');
         const keysPush = mergeKeys(cloud);
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
@@ -549,6 +557,15 @@
       SYNC.reenc = false;
       SYNC.state = 'ok'; SYNC.lastErr = '';
     } catch (e) {
+      if (e && e.message === 'FORCE_PUSH') {
+        // 用本机数据 + 本机密码重新加密，覆盖云端（云端原来的版本仍在 Gist 历史里）
+        try {
+          backupNow('forcePush'); markDirty(); await pushCloud(true); save();
+          logOp('system', null, 'forcePush');
+          SYNC.reenc = false; SYNC.state = 'ok'; SYNC.lastErr = ''; SYNC.busy = false; SYNC.lastCheck = Date.now();
+          renderSyncBtn(); if (UI.page === 'settings') renderPage(); toast(t('cloudForceDone'), 'ok'); return;
+        } catch (e2) { e = e2; }
+      }
       SYNC.reenc = false; SYNC.state = 'err'; SYNC.lastErr = (e && e.message) || 'error'; SYNC.lastPhase = SYNC.phase;   // 存原始错误，显示时按当前语言翻译
       if (!opt.silent && e.message !== 'CANCEL') toast(t('syncFail') + ' · ' + syncErrNow(), 'err');
     }
@@ -2744,6 +2761,16 @@
       return 'fnv:' + (h >>> 0).toString(16);
     }
   }
+  /** 自检：本机的同步密钥必须由当前锁定密码生成；不一致时（旧版本 / 多个窗口互相覆盖等）用当前密码重新生成，旧密钥留着读取云端旧数据 */
+  async function healSyncKey(pw) {
+    try {
+      if (!S().syncKey || !S().syncSalt) return;
+      const k = await deriveKeyRaw(pw, S().syncSalt, S().syncIter || ENC_ITER);
+      if (k === S().syncKey) return;
+      S().syncKeyPrev = [S().syncKey].concat(S().syncKeyPrev || []).filter((x, i, a) => a.indexOf(x) === i).slice(0, 5);
+      await setSyncKey(pw); SYNC.reenc = true; save();
+    } catch (e) { /* 浏览器不支持加密时忽略 */ }
+  }
   async function setPasswordFlow(msg) {
     const hasOld = !!S().passHash;
     const r = await passDialog(hasOld ? t('changePass') : t('setPass'), hasOld ? t('changePassMsg') : (msg || t('setPassMsg')), hasOld ? ['old', 'new', 'confirm'] : ['new', 'confirm']);
@@ -2751,9 +2778,10 @@
     if (hasOld && (await hashPass(r.old)) !== S().passHash) { toast(t('passWrong'), 'err'); return false; }
     if (!r.new || r.new.length < 4) { toast(t('passShort'), 'err'); return false; }
     if (r.new !== r.confirm) { toast(t('passMismatch'), 'err'); return false; }
+    const oldKey = S().syncKey;
+    try { await setSyncKey(r.new); } catch (e) { /* 浏览器不支持加密时仅设置锁定密码 */ }   // 先生成新密钥，再改密码，两者始终一致
+    if (oldKey && oldKey !== S().syncKey) S().syncKeyPrev = [oldKey].concat(S().syncKeyPrev || []).slice(0, 5);   // 记住旧密钥，用来读取还没重新加密的云端数据
     S().passHash = await hashPass(r.new); S().passChangedAt = Date.now();
-    if (S().syncKey) S().syncKeyPrev = [S().syncKey].concat(S().syncKeyPrev || []).slice(0, 3);   // 记住旧密钥，用来读取还没重新加密的云端数据
-    try { await setSyncKey(r.new); } catch (e) { /* 浏览器不支持加密时仅设置锁定密码 */ }
     unlockFor();
     save(); toast(t('passSaved'), 'ok');
     if (syncReady()) { SYNC.reenc = true; clearTimeout(SYNC.timer); syncNow({ silent: true, interactive: true }); }   // 立即用新密码重新加密云端
@@ -2773,6 +2801,7 @@
     const r = await passDialog(t('verifyPass'), reason || t('verifyMsg'), ['cur']);
     if (!r) return false;
     if ((await hashPass(r.cur)) !== S().passHash) { toast(t('passWrong'), 'err'); return false; }
+    healSyncKey(r.cur);
     unlockFor();
     if ((UI.page === 'ledger' || UI.page === 'holdings') && $('[data-action="lock-toggle"]')) refreshLockBtn();
     return true;
