@@ -64,7 +64,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1987,12 +1987,20 @@
   const cycleSpec = s => (s.cycle === 'month' ? [1, 'month'] : s.cycle === 'quarter' ? [3, 'month'] : s.cycle === 'year' ? [1, 'year']
     : s.cycle === 'custom' ? [Math.max(1, +s.cycleN || 1), s.cycleU || 'month'] : null);
   const addCycle = (k, s) => { const c = cycleSpec(s); return c ? addDate(k, c[0], c[1]) : null; };
+  /** 第 n 期的扣费日：始终从起点按 n 个周期计算，避免月底日期越推越早（1/31 → 2/28 → 3/31） */
+  const cycleAt = (k0, s, n) => { const c = cycleSpec(s); return c ? addDate(k0, c[0] * n, c[1]) : null; };
+  /** 起点之后第一个晚于 after 的扣费日 */
+  function nextBill(k0, s, after) { let n = 0, d = k0; while (d && d <= after && n < 5000) d = cycleAt(k0, s, ++n); return d; }
   const daysTo = k => Math.round((dOf(k) - dOf(todayKey())) / 864e5);
   const billStart = s => (+s.trialDays > 0 ? addDate(s.start, +s.trialDays, 'day') : s.start);
   /** 某天适用的价格（续费时涨价会记一笔价格变动，之前的推算账单仍按旧价） */
   function priceAt(s, d) {
-    const h = (s.priceHist || []).filter(x => x.from <= d).sort((a, b) => (a.from < b.from ? -1 : 1));
+    // 价格时间线（账单明细里设置的“从某天起每期价格”）+ 续费时涨价生效的记录
+    const tl = (s.prices || []).map(x => ({ from: x.from, p: x.p })).concat((s.priceHist || []).map(x => ({ from: x.from, p: x.p })))
+      .filter(x => x.from).sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+    const h = tl.filter(x => x.from <= d);
     if (h.length) return +h[h.length - 1].p || 0;
+    if (s.prices && s.prices.length) return +tl[0].p || 0;                 // 早于第一段：按第一段价格
     return s.priceHist && s.priceHist.length ? +s.priceHist[0].old || +s.price || 0 : +s.price || 0;
   }
   /** 折合每月：月付 = 价格；季付 ÷ 3；年付 ÷ 12；自定义按天数换算；一次性不折算 */
@@ -2004,15 +2012,19 @@
   const cycleLabel = s => (s.cycle === 'custom' ? t('cycEvery', { n: Math.max(1, +s.cycleN || 1), u: t('unitD_' + (s.cycleU || 'month')) }) : t('cyc_' + (s.cycle || 'month')));
   const cycleShort = s => (s.cycle === 'custom' ? `${Math.max(1, +s.cycleN || 1)}${t('unitS2_' + (s.cycleU || 'month'))}` : t('cycS_' + (s.cycle || 'month')));
   /** 一个订阅的全部扣费（显示币种） */
-  function subPays(s) {
-    const real = DB.txs.filter(x => x.subId === s.id && x.type === 'expense').map(x => ({ date: x.date, v: conv(+x.amount || 0, x.ccy), real: true, id: x.id }));
+  function subPays(s, all) {
+    const real = DB.txs.filter(x => x.subId === s.id && x.type === 'expense').map(x => ({ date: x.date, v: conv(+x.amount || 0, x.ccy), amt: +x.amount || 0, ccy: x.ccy, real: true, id: x.id }));
     const first = real.reduce((m, x) => (!m || x.date < m ? x.date : m), '');
     const est = [], tk = todayKey();
-    let d = s.start ? billStart(s) : '', guard = 0;
-    while (d && d <= tk && (!first || d < first) && (!s.expire || d < s.expire) && guard++ < 3000) {
-      est.push({ date: d, v: conv(priceAt(s, d), s.ccy), real: false });
+    const b0 = s.start ? billStart(s) : '';
+    let d = b0, n = 0;
+    while (d && d <= tk && (!first || d < first) && (!s.expire || d < s.expire) && n < 3000) {
+      // 单期调整：折扣（自定义金额）/ 免费（0）/ 跳过（这期没扣费，不计入）
+      const base = priceAt(s, d), a = s.adj && s.adj[d];
+      const amt = a ? (a.t === 'free' || a.t === 'skip' ? 0 : +a.amt || 0) : base;
+      if (!(a && a.t === 'skip') || all) est.push({ date: d, v: conv(amt, s.ccy), amt, base, ccy: s.ccy, real: false, tag: a ? a.t : '', note: a ? a.n || '' : '' });
       if (s.cycle === 'once') break;
-      d = addCycle(d, s);
+      d = cycleAt(b0, s, ++n);
     }
     return real.concat(est);
   }
@@ -2203,7 +2215,7 @@
   function renderSubBody() {
     const U = UI.sub, rows = subList();
     renderBatchBar('sub', rows.map(r => r.s.id));
-    const ops = s => `<div class="ops icon-ops">${histBtn('sub', s.id)}<button class="op upd" data-action="sub-price" data-id="${s.id}" title="${t('subPriceUp')}">${ic('trend')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}" title="${t('del')}">${ic('trash')}</button></div>`;
+    const ops = s => `<div class="ops icon-ops">${histBtn('sub', s.id)}<button class="op bills" data-action="sub-bills" data-id="${s.id}" title="${t('subBillsT')}">${ic('receipt')}</button><button class="op upd" data-action="sub-price" data-id="${s.id}" title="${t('subPriceUp')}">${ic('trend')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}" title="${t('del')}">${ic('trash')}</button></div>`;
     const payTxt = s => (s.payId ? `${esc(acctName(s.payId))}${acctWh(s.payId) ? `<small class="wh-sm">${ic('db')}${esc(acctWh(s.payId))}</small>` : ''}` : '<span class="dim">—</span>');
     const trial = s => (+s.trialDays > 0 && s.cycle !== 'once' ? `<span class="trial-b ${subState(s) === 'trial' ? 'on' : ''}">${t('subTrialN', { n: s.trialDays })}</span>` : '');
     // 账号 / 网站：只显示图标，点开才显示内容
@@ -2223,7 +2235,7 @@
           <div><div class="l">${t('subColPay')}</div><div class="x">${s.payId ? esc(acctName(s.payId)) : '—'}</div></div>
           <div><div class="l">${t('subColRemind')}</div><div class="x">${+s.remind ? t('subRemindN', { n: s.remind }) : '—'}</div></div>
         </div>
-        ${U.batch ? '' : `<div class="hc-ops">${histBtn('sub', s.id)}<button class="op upd" data-action="sub-price" data-id="${s.id}">${ic('trend')}${t('subPriceUpS')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}">${ic('trash')}${t('del')}</button></div>`}
+        ${U.batch ? '' : `<div class="hc-ops">${histBtn('sub', s.id)}<button class="op bills" data-action="sub-bills" data-id="${s.id}">${ic('receipt')}${t('subBillsS')}</button><button class="op upd" data-action="sub-price" data-id="${s.id}">${ic('trend')}${t('subPriceUpS')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}">${ic('trash')}${t('del')}</button></div>`}
       </div>`; }).join('')}</div>`;
     } else {
       const head = (k, label) => { const on = U.sort === k + 'Desc' || U.sort === k + 'Asc'; return `<th class="r sortable ${on ? 'on' : ''}" data-action="sub-sort-head" data-v="${k}">${label}<span class="arr">${U.sort === k + 'Asc' ? '↑' : '↓'}</span></th>`; };
@@ -2244,7 +2256,7 @@
           <td class="num">${s.start || '—'}${s.cycle === 'once' ? `<small>${t('subBuyDate')}</small>` : s.trialDays > 0 ? `<small>${t('subBillFrom', { d: billStart(s) })}</small>` : ''}</td>
           <td class="num exp-cell">${expireHTML(s)}</td>
           <td class="c">${+s.remind ? `<span class="rm-b">${ic('clock')}${t('subRemindN', { n: s.remind })}</span>` : '<span class="dim">—</span>'}</td>
-          <td class="r num strong">${money(x.total)}<small>${t('subPayN', { n: subPays(s).length })}</small></td>
+          <td class="r num strong">${money(x.total)}<small>${t('subPayN', { n: subPays(s).length })}${(s.prices && s.prices.length > 1) || (s.adj && Object.keys(s.adj).length) ? ` · <span class="adj-mk">${t('subBillAdjMk')}</span>` : ''}</small></td>
           <td class="c">${U.batch ? '' : ops(s)}</td></tr>`;
       }).join('');
       body = `<div class="card glass table-card"><div class="table-wrap"><table class="tbl sub-tbl">
@@ -2258,6 +2270,90 @@
     $('#sub-body').innerHTML = body;
   }
 
+  /* ---- 账单明细：价格时间线 + 每期账单调整（只影响订阅统计，不动账户余额和到期时间） ---- */
+  function openSubBills(s, keep) {
+    const tk = todayKey();
+    const st = keep || { prices: JSON.parse(JSON.stringify(s.prices || [])), adj: JSON.parse(JSON.stringify(s.adj || {})), edit: null, show: 24 };
+    if (!st.prices.length) st.prices = [{ from: s.start || tk, p: priceAt(s, s.start || tk) }];   // 没设置过：第一段 = 开始价格
+    const cs = s.ccy, mny = v => money(v, { ccy: cs, max: 2, raw: true });
+    openModal({
+      title: `${t('subBillsT')} · ${esc(s.name)}`,
+      body: `<div class="bl-head">${subIconHTML(s, 'lg')}<div id="bl-sum" class="bl-sum"></div></div>
+        <div class="bl-sec"><div class="bl-h"><b>${ic('trend')}${t('subPriceTl')}</b><button type="button" class="btn btn-glass sm" id="bl-add">${ic('plus')}${t('subPriceAdd')}</button></div>
+          <div id="bl-prices"></div><p class="hint">${t('subPriceTlHint')}</p></div>
+        <div class="bl-sec"><div class="bl-h"><b>${ic('receipt')}${t('subBillList')}</b><span class="dim">${t('subBillListHint')}</span></div>
+          <div id="bl-list" class="bl-list"></div></div>`,
+      footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" id="bl-save">${ic('check')}${t('save')}</button>`,
+      onMount(m) {
+        const fake = () => Object.assign({}, s, { prices: st.prices.filter(x => x.from && x.p !== '' && !isNaN(+x.p)), adj: st.adj });
+        const drawPrices = () => {
+          $('#bl-prices', m).innerHTML = st.prices.map((x, i) => `<div class="pt-row">
+            <span class="pt-l">${i ? t('subPriceFrom') : t('subPriceStart')}</span>
+            <input class="input" type="date" data-i="${i}" data-f="from" value="${esc(x.from || '')}">
+            <div class="price-row"><input class="input num" inputmode="decimal" data-i="${i}" data-f="p" value="${x.p === '' ? '' : esc(trim8(x.p))}"><span class="unit-txt">${esc(cs)} / ${esc(cycleShort(s))}</span></div>
+            ${st.prices.length > 1 ? `<button type="button" class="icon-btn sm" data-del="${i}" title="${t('del')}">${ic('trash')}</button>` : '<span></span>'}</div>`).join('');
+        };
+        const drawList = () => {
+          const f = fake(), bills = subPays(f, true).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+          const counted = bills.filter(b => b.tag !== 'skip'), tot = counted.reduce((a, b) => a + b.v, 0);
+          const nAdj = bills.filter(b => b.tag).length;
+          $('#bl-sum', m).innerHTML = `<div class="dim">${t('subColTotal')}</div><b class="num">${money(tot)}</b>
+            <small>${t('subPayN', { n: counted.length })}${counted.length ? ` · ${t('subBillAvg', { v: money(tot / counted.length) })}` : ''}${nAdj ? ` · ${t('subBillAdjN', { n: nAdj })}` : ''}</small>`;
+          if (!bills.length) { $('#bl-list', m).innerHTML = `<div class="empty sm"><p>${t('subBillNone')}</p></div>`; return; }
+          const rows = bills.slice(0, st.show).map(b => {
+            if (b.real) return `<div class="bl-row real"><span class="num bl-d">${b.date}</span><span class="bl-tag rec">${t('subBillRec')}</span>
+              <span class="num bl-a">${money(b.amt, { ccy: b.ccy, max: 2 })}</span><button type="button" class="icon-btn sm" data-tx="${b.id}" title="${t('subBillOpenTx')}">${ic('edit')}</button></div>`;
+            const tag = b.tag === 'free' ? t('subBillFree') : b.tag === 'skip' ? t('subBillSkip') : b.tag === 'custom' ? t('subBillDisc') : t('subBillEst');
+            const changed = b.tag && Math.abs(b.amt - b.base) > 1e-9;
+            const row = `<div class="bl-row ${b.tag ? 'adj ' + b.tag : ''} ${st.edit === b.date ? 'open' : ''}" data-d="${b.date}"><span class="num bl-d">${b.date}</span><span class="bl-tag ${b.tag || 'est'}">${tag}</span>
+              <span class="num bl-a">${changed ? `<s>${mny(b.base)}</s>` : ''}${b.tag === 'skip' ? '—' : mny(b.amt)}${b.note ? `<small>${esc(b.note)}</small>` : ''}</span>
+              <button type="button" class="icon-btn sm" data-edit="${b.date}" title="${t('subBillEdit')}">${ic('edit')}</button></div>`;
+            if (st.edit !== b.date) return row;
+            const a = st.adj[b.date] || {};
+            return row + `<div class="bl-ed" data-d="${b.date}">
+              <div class="seg seg-full" data-k="t">${['custom', 'free', 'skip'].map(k => `<button type="button" data-v="${k}" class="${(a.t || 'custom') === k ? 'on' : ''}">${t(k === 'custom' ? 'subBillDiscS' : k === 'free' ? 'subBillFree' : 'subBillSkip')}</button>`).join('')}</div>
+              <div class="price-row" style="margin-top:8px"><input class="input num" inputmode="decimal" data-k="amt" value="${a.t === 'custom' || !a.t ? esc(trim8(a.t ? a.amt : b.base)) : '0'}" ${a.t && a.t !== 'custom' ? 'disabled' : ''}><span class="unit-txt">${esc(cs)}</span>
+                <input class="input" data-k="n" maxlength="40" placeholder="${t('subBillNotePh')}" value="${esc(a.n || '')}"></div>
+              <div class="bl-ed-btns">${a.t ? `<button type="button" class="btn btn-glass sm" data-reset="${b.date}">${t('subBillReset')}</button>` : ''}<button type="button" class="btn btn-accent sm" data-ok="${b.date}">${ic('check')}${t('subBillApply')}</button></div></div>`;
+          }).join('');
+          $('#bl-list', m).innerHTML = rows + (bills.length > st.show ? `<button type="button" class="btn btn-glass sm bl-more" id="bl-more">${t('loadMore')} (${bills.length - st.show})</button>` : '');
+        };
+        drawPrices(); drawList();
+        $('#bl-add', m).addEventListener('click', () => { const last = st.prices[st.prices.length - 1]; st.prices.push({ from: tk, p: last ? last.p : s.price }); drawPrices(); drawList(); });
+        $('#bl-prices', m).addEventListener('input', e => { const i = +e.target.dataset.i; if (isNaN(i)) return; const f = e.target.dataset.f; st.prices[i][f] = f === 'p' ? (e.target.value.trim() === '' ? '' : parseNum(e.target.value)) : e.target.value; drawList(); });
+        $('#bl-prices', m).addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (!b) return; st.prices.splice(+b.dataset.del, 1); drawPrices(); drawList(); });
+        $('#bl-list', m).addEventListener('click', e => {
+          const tx = e.target.closest('[data-tx]'); if (tx) { closeModal(); setTimeout(() => actions['edit-tx'](tx), 220); return; }
+          const ed = e.target.closest('[data-edit]'); if (ed) { st.edit = st.edit === ed.dataset.edit ? null : ed.dataset.edit; drawList(); return; }
+          if (e.target.closest('#bl-more')) { st.show += 48; drawList(); return; }
+          const box = e.target.closest('.bl-ed'); if (!box) return;
+          const d = box.dataset.d, sg = e.target.closest('[data-k="t"] [data-v]');
+          if (sg) { $$('[data-k="t"] button', box).forEach(x => x.classList.toggle('on', x === sg)); const inp = $('[data-k="amt"]', box); inp.disabled = sg.dataset.v !== 'custom'; if (inp.disabled) inp.value = '0'; return; }
+          if (e.target.closest('[data-reset]')) { delete st.adj[d]; st.edit = null; drawList(); return; }
+          if (e.target.closest('[data-ok]')) {
+            const k = ($('[data-k="t"] .on', box) || {}).dataset.v || 'custom', amt = parseNum($('[data-k="amt"]', box).value), n = $('[data-k="n"]', box).value.trim();
+            if (k === 'custom' && !(amt >= 0)) { toast(t('errAmount'), 'err'); return; }
+            st.adj[d] = k === 'custom' ? { t: 'custom', amt: round8(amt), n } : { t: k, n };
+            st.edit = null; drawList();
+          }
+        });
+        $('#bl-save', m).addEventListener('click', () => {
+          const pr = st.prices.filter(x => x.from || x.p !== '');
+          if (pr.some(x => !/^\d{4}-\d{2}-\d{2}$/.test(x.from || '') || x.p === '' || isNaN(+x.p) || +x.p < 0)) { toast(t('subPriceBad'), 'err'); return; }
+          const seen = {}; pr.forEach(x => { seen[x.from] = { from: x.from, p: round8(+x.p) }; });
+          const prices = Object.values(seen).sort((a, b) => (a.from < b.from ? -1 : 1));
+          const adj = {}; Object.keys(st.adj).forEach(k => { adj[k] = st.adj[k]; });
+          const d = [];
+          if (JSON.stringify(prices) !== JSON.stringify(s.prices || [])) d.push(['prices', s.prices || '', prices]);
+          if (JSON.stringify(adj) !== JSON.stringify(s.adj || {})) d.push(['adj', Object.keys(s.adj || {}).length, Object.keys(adj).length]);
+          s.prices = prices; s.adj = adj;
+          s.price = round8(priceAt(s, tk));   // 列表里显示的“当前价格”跟着时间线走
+          if (d.length) logOp('sub', s, 'bills', d);
+          commit(); closeModal(); renderAll(); toast(t('saved'), 'ok');
+        });
+      }
+    });
+  }
   /** 账号 / 网站：点击图标后弹出显示，可复制、打开网站 */
   function openSubInfo(anchor, s, k) {
     if (popEl) { const same = popEl.dataset.for === s.id + k; closePopover(); if (same) return; }
@@ -2347,10 +2443,8 @@
         const autoExp = () => {
           const r = read(); if (!r.start) return '';
           if (r.cycle === 'once') return '';
-          let d = billStart(r), g = 0;
-          if (d > todayKey()) return d;
-          while (d <= todayKey() && g++ < 3000) d = addCycle(d, r);
-          return d;
+          const d = billStart(r);
+          return d > todayKey() ? d : nextBill(d, r, todayKey());
         };
         const preview = () => {
           const r = read(), forever = $('#sf-forever', m).checked, buy = r.cycle === 'once';
@@ -2364,7 +2458,7 @@
           $('#sf-ccy-h', m).textContent = oc && r.ccy ? (validCcy(r.ccy) ? t('ccyRateOk', { c: r.ccy, v: fmtNum(rateOf(r.ccy), 0, 4) }) : t('errRate', { c: r.ccy })) : '';
           $('#sf-expire', m).disabled = forever;
           if (!expTouched && !forever) { const a = autoExp(); $('#sf-expire', m).value = a; if (!a) { $('#sf-forever', m).checked = true; $('#sf-expire', m).disabled = true; } }
-          const fake = Object.assign({ id: '__p' }, r, { expire: buy || $('#sf-forever', m).checked ? '' : $('#sf-expire', m).value, trialDays: buy ? 0 : r.trialDays, priceHist: ex ? ex.priceHist : null });
+          const fake = Object.assign({ id: '__p' }, r, { expire: buy || $('#sf-forever', m).checked ? '' : $('#sf-expire', m).value, trialDays: buy ? 0 : r.trialDays, priceHist: ex ? ex.priceHist : null, prices: ex ? ex.prices : null, adj: ex ? ex.adj : null });
           if (isNaN(fake.price)) fake.price = 0;
           if (!validCcy(fake.ccy)) fake.ccy = S().ccy;
           const pays = ex ? subPays(Object.assign({}, fake, { id: ex.id })) : subPays(fake);
@@ -2410,7 +2504,14 @@
           const rec = { name, alias: $('#sf-alias', m).value.trim(), account: $('#sf-account', m).value.trim(), site, cat, price: round8(r.price), ccy: r.ccy, cycle: r.cycle, cycleN: r.cycle === 'custom' ? r.cycleN : 1, cycleU: r.cycle === 'custom' ? r.cycleU : 'month',
             start: r.start, trialDays: r.trialDays, expire, payId: $('#sf-pay', m).value || '', remind: +st.remind || 0, note: $('#sf-note', m).value.trim(), icon: st.icon || '' };
           if (ex) {
-            if (ex.price !== rec.price) rec.priceHist = [];   // 手动改价格视为更正：之前的推算账单也按新价格
+            if (ex.price !== rec.price) {
+              if (ex.prices && ex.prices.length) {
+                // 有价格时间线：只改“当前这一段”的价格，之前的价格段不变
+                const arr = ex.prices.map(x => Object.assign({}, x)), tk = todayKey();
+                let i = -1; arr.forEach((x, j) => { if (x.from <= tk) i = j; });
+                arr[i < 0 ? 0 : i].p = rec.price; rec.prices = arr;
+              } else rec.priceHist = [];   // 手动改价格视为更正：之前的推算账单也按新价格
+            }
             const d = diffOf(ex, rec, SUB_FIELDS);
             Object.assign(ex, rec);
             if (d.length) logOp('sub', ex, 'edit', d.map(x => (x[0] === 'icon' ? ['icon', x[1] ? 1 : '', x[2] ? 1 : ''] : x)));
@@ -3444,6 +3545,8 @@
       if (f === 'expire' && (v === '' || v == null)) return esc(t('subForever'));
       if (v === '' || v == null) return '<span class="dim">∅</span>';
       if (f === 'cat') return esc(subCatName(v));
+      if (f === 'prices') return esc(Array.isArray(v) ? v.map(x => `${x.from} ${trim8(x.p)}`).join('；') : String(v));
+      if (f === 'adj') return esc(t('subBillAdjN', { n: v }));
       if (f === 'account') { const a = String(v); return esc(a.length > 4 ? a.slice(0, 2) + '•••' + a.slice(-2) : '•••'); }   // 记录里不显示完整账号
       if (f === 'cycle') return esc(t('cyc_' + v));
       if (f === 'cycleU') return esc(t('unitD_' + v));
@@ -3765,7 +3868,7 @@
     const tk = todayKey(), soon = addDate(tk, 2, 'day');
     const mkSub = (name, cat, price, ccy, cycle, start, payId, extra) => {
       const sb = Object.assign({ id: uid(), createdAt: ts - 1000, name, cat, price, ccy, cycle, cycleN: 1, cycleU: 'month', start, trialDays: 0, expire: '', payId, remind: 3, nextPrice: null, note: '', locked: false, icon: '' }, extra || {});
-      if (!sb.expire && cycle !== 'once') { let d = billStart(sb), g = 0; while (d <= tk && g++ < 999) d = addCycle(d, sb); sb.expire = d; }
+      if (!sb.expire && cycle !== 'once') sb.expire = nextBill(billStart(sb), sb, tk);
       return sb;
     };
     const subs = [
@@ -3777,6 +3880,12 @@
       mkSub('jasper.dev', 'domain', 12.98, 'USD', 'year', addDate(addDate(tk, -32, 'month'), -3, 'day'), chase, { remind: 7 }),
       mkSub('Netflix', 'media', 15.49, 'USD', 'month', addDate(addDate(tk, -14, 'month'), -9, 'day'), chase, { nextPrice: 17.99, alias: N('标准方案', 'Standard'), account: 'family@example.com', site: 'https://www.netflix.com/account' }),
       mkSub('YouTube Premium', 'media', 129.99, 'TRY', 'month', addDate(addDate(tk, -7, 'month'), -12, 'day'), chase, { alias: N('土耳其区', 'Turkey'), site: 'https://www.youtube.com/paid_memberships' }),
+      (() => {
+        const st0 = addDate(addDate(tk, -31, 'month'), -2, 'day'), sb = mkSub('Spotify Premium', 'media', 11.99, 'USD', 'month', st0, chase, { alias: N('个人版', 'Individual'), site: 'https://www.spotify.com/account/' });
+        sb.prices = [{ from: st0, p: 9.99 }, { from: addDate(st0, 14, 'month'), p: 10.99 }, { from: addDate(st0, 25, 'month'), p: 11.99 }];
+        sb.adj = { [addDate(st0, 0, 'month')]: { t: 'free', n: N('新用户免费', 'Free trial month') }, [addDate(st0, 1, 'month')]: { t: 'custom', amt: 0.99, n: N('首三月促销', 'Intro promo') }, [addDate(st0, 2, 'month')]: { t: 'custom', amt: 0.99, n: N('首三月促销', 'Intro promo') }, [addDate(st0, 20, 'month')]: { t: 'custom', amt: 5.99, n: N('黑五五折', 'Black Friday') } };
+        return sb;
+      })(),
       mkSub(N('iCloud+ 200GB', 'iCloud+ 200GB'), 'cloud', 21, 'CNY', 'month', addDate(addDate(tk, -26, 'month'), -1, 'day'), cmb, { remind: 0 }),
       mkSub('Final Cut Pro', 'software', 299.99, 'USD', 'once', addDate(tk, -20, 'month'), chase, { alias: 'Apple', remind: 0 }),
       mkSub('Notion Plus', 'software', 96, 'USD', 'year', addDate(tk, -4, 'day'), chase, { trialDays: 14 }),
@@ -3880,6 +3989,11 @@
       openSubPrice(s);
     },
     'sub-period'(el) { UI.sub.period = el.dataset.v; renderSubs(); },
+    async 'sub-bills'(el) {
+      const s = findSub(el.dataset.id); if (!s) return;
+      if (s.locked && !(await requireUnlock(t('verifyLockedMsg'), true))) return;
+      openSubBills(s);
+    },
     'sub-info'(el) { const s = findSub(el.dataset.id); if (s) openSubInfo(el, s, el.dataset.k); },
     'sub-cat'(el) { UI.sub.cat = UI.sub.cat === el.dataset.v && el.classList.contains('legend-row') ? 'all' : el.dataset.v; renderSubs(); },
     'sub-pmode'(el) { UI.sub.pmode = el.dataset.v; renderSubs(); },
