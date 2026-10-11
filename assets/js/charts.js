@@ -283,5 +283,61 @@
     }
   }
 
-  window.AVCharts = { donut, line, candle, yScale };
+  /* ---------- 堆叠柱状图（订阅费用） ----------
+     cfg: { labels:[], stacks:[[{key,color,v}]], step, fmtY, tip(i), mark(i) 高亮某一根（如今天） } */
+  function bars(el, cfg) {
+    const W = Math.max(280, Math.floor(el.clientWidth || 600));
+    const H = Math.max(180, Math.floor(el.clientHeight || 270));
+    const { labels, stacks } = cfg, n = labels.length;
+    const tot = stacks.map(st => st.reduce((s, x) => s + Math.max(0, x.v), 0));
+    const sc = yScale(Math.max(0, ...tot), cfg.step);
+    const yl = sc.ticks.map(cfg.fmtY || String);
+    const padL = Math.ceil(Math.max(...yl.map(s => s.length)) * 6.8) + 14, padR = 10, padT = 16, padB = 30;
+    const pw = W - padL - padR, ph = H - padT - padB, slot = pw / Math.max(1, n);
+    const bw = Math.max(3, Math.min(30, slot * 0.62)), base = padT + ph;
+    const X = i => padL + slot * i + slot / 2, Y = v => padT + ph - (v / sc.top) * ph;
+    let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+    sc.ticks.forEach((v, i) => {
+      const y = Y(v);
+      s += `<line class="gl ${i === 0 ? 'base' : ''}" x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}"/>`;
+      s += `<text class="al" x="${padL - 10}" y="${y + 4}" text-anchor="end">${yl[i]}</text>`;
+    });
+    const k = Math.ceil(n / Math.max(2, Math.floor(pw / 40)));
+    labels.forEach((lb, i) => {
+      if (i % k === 0 || i === n - 1 && (n - 1) % k >= k / 2) s += `<text class="al ${cfg.mark && cfg.mark(i) ? 'mk' : ''}" x="${X(i)}" y="${H - 8}" text-anchor="middle">${lb}</text>`;
+    });
+    stacks.forEach((st, i) => {
+      if (!tot[i]) return;
+      let y0 = base, segs = '';
+      const parts = st.filter(x => x.v > 0);
+      parts.forEach((x, j) => {
+        const h = (x.v / sc.top) * ph, y = y0 - h, top = j === parts.length - 1, r = Math.min(5, bw / 2, h);
+        // 最上面一段做圆角，其余是直角
+        segs += top
+          ? `<path d="M${X(i) - bw / 2},${y0}V${y + r}Q${X(i) - bw / 2},${y} ${X(i) - bw / 2 + r},${y}H${X(i) + bw / 2 - r}Q${X(i) + bw / 2},${y} ${X(i) + bw / 2},${y + r}V${y0}Z" fill="${x.color}"/>`
+          : `<rect x="${X(i) - bw / 2}" y="${y}" width="${bw}" height="${h}" fill="${x.color}"/>`;
+        y0 = y;
+      });
+      s += `<g class="bar-g ${cfg.mark && cfg.mark(i) ? 'mk' : ''}" data-i="${i}" style="animation-delay:${Math.min(i * 18, 400)}ms">${segs}</g>`;
+    });
+    s += `<line class="guide" x1="0" x2="0" y1="${padT}" y2="${base}"/>`;
+    s += `<rect class="ov" x="${padL}" y="0" width="${pw}" height="${H}" fill="transparent"/></svg>`;
+    el.innerHTML = s + `<div class="chart-tip"></div>`;
+    const tip = el.querySelector('.chart-tip'), ov = el.querySelector('.ov'), gs = el.querySelectorAll('.bar-g');
+    const move = e => {
+      const rect = el.getBoundingClientRect();
+      const i = Math.max(0, Math.min(n - 1, Math.floor((e.clientX - rect.left - padL) / slot)));
+      el.classList.add('hover');
+      gs.forEach(g => g.classList.toggle('hl', +g.dataset.i === i));
+      tip.innerHTML = cfg.tip ? cfg.tip(i) : '';
+      const tw = tip.offsetWidth || 160;
+      tip.style.left = Math.max(tw / 2 + 4, Math.min(W - tw / 2 - 4, X(i))) + 'px';
+      tip.style.top = Math.max(Y(tot[i] || 0), tip.offsetHeight + 18) + 'px';
+    };
+    ov.addEventListener('pointermove', move);
+    ov.addEventListener('pointerdown', move);
+    ov.addEventListener('pointerleave', () => { el.classList.remove('hover'); gs.forEach(g => g.classList.remove('hl')); });
+  }
+
+  window.AVCharts = { donut, line, candle, bars, yScale };
 })();
