@@ -64,9 +64,9 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
-  const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
+  const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
 
   const ICON = {
@@ -292,6 +292,8 @@
     const body = await encodeCloud(JSON.stringify(exportable(true)));
     SYNC.phase = 'push';    // 加密后再上传（含行情 API Key）
     const id = await Api.gistPush(S().gistToken, S().gistId, body, `AssetHub · ${bookName()}`);
+    const pm = Api.gistPush.meta || {};
+    S().lastPush = { at: pm.updated || '', ver: pm.version || '', ts: Date.now() };
     S().gistId = id; S().snapsGist = id; S().syncedStamp = DB.meta.updatedAt || 0; S().gistLast = Date.now();
   }
   /* ================= 同步加密 =================
@@ -316,13 +318,21 @@
     const st = new Blob([bytes]).stream().pipeThrough(mode === 'gzip' ? new CompressionStream('gzip') : new DecompressionStream('gzip'));
     return new Uint8Array(await new Response(st).arrayBuffer());
   }
+  /** 本设备的名字和编号（写进云端数据的明文头，方便看出是哪台设备上传的；不包含任何个人数据） */
+  function devInfo() {
+    if (!S().devId) { S().devId = Math.random().toString(36).slice(2, 6); }
+    const ua = navigator.userAgent || '', tp = navigator.maxTouchPoints > 1;
+    const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) || (/Macintosh/.test(ua) && tp) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Macintosh/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Linux';
+    const app = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    return { id: S().devId, name: `${os} ${app ? 'App' : (/Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /Firefox\//.test(ua) ? 'Firefox' : 'Web')}` };
+  }
   async function encodeCloud(text) {
-    const iv = crypto.getRandomValues(new Uint8Array(12)), z = canZip();
+    const iv = crypto.getRandomValues(new Uint8Array(12)), z = canZip(), dv = devInfo();
     let bytes = new TextEncoder().encode(text);
     if (z) bytes = await zipBytes(bytes, 'gzip');
     const ct = b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(S().syncKey), bytes));
     const lines = ct.match(/.{1,100}/g) || [''];
-    const head = JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, pc: S().passChangedAt || 0, z: z ? 'gzip' : '', iv: b64(iv) });
+    const head = JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, pc: S().passChangedAt || 0, z: z ? 'gzip' : '', iv: b64(iv), dev: dv.id, dn: dv.name, ts: Date.now() });
     return head.slice(0, -1) + ',"data":[\n' + lines.map(l => JSON.stringify(l)).join(',\n') + '\n]}';
   }
   async function decryptWith(raw, env) {
@@ -354,7 +364,10 @@
       try { const d = JSON.parse(await decryptWith(pk, obj)); if (!opt.old) SYNC.reenc = true; return d; } catch (e) { /* 继续 */ }
     }
     if (!opt.interactive) throw new Error('NEED_PASS');
-    const pcTxt = obj.pc ? '<br><span class="dim">' + t('cloudPassPc', { d: fullTime(obj.pc) }) + '</span>' : '';
+    const who = obj.dev ? (obj.dev === S().devId ? t('cloudByThis') : `${esc(obj.dn || '?')}（${esc(obj.dev)}）`) : '';
+    const pcTxt = (obj.pc ? '<br><span class="dim">' + t('cloudPassPc', { d: fullTime(obj.pc) }) + '</span>' : '') +
+      (obj.ts ? '<br><span class="dim">' + t('cloudUpBy', { d: fullTime(obj.ts), w: who || '?' }) + '</span>' : '') +
+      '<br><span class="dim">' + t('cloudThisDev', { w: esc(devInfo().name) + '（' + esc(S().devId) + '）' }) + '</span>';
     for (let i = 0; i < 3; i++) {
       const r = await passDialog(t('cloudPassT'), (i ? t('passWrongRetry') : t(opt.old ? 'cloudPassOldM' : 'cloudPassM')) + pcTxt, ['cur']);
       if (!r) throw new Error('CANCEL');
@@ -521,7 +534,15 @@
         if (!opt.silent) toast(t('syncPushed'), 'ok');
       } else {
         SYNC.phase = 'pull';
-        const cloud = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: inter, allowForce: true });
+        const fresh = await pullFresh();
+        if (fresh.stale) {
+          // GitHub 还在返回比我们刚上传的更旧的副本：不要去解密 / 要密码，当作已是最新，稍后再同步
+          S().gistLast = Date.now(); save();
+          if (!opt.silent) toast(t('syncStale'), 'ok');
+          SYNC.reenc = false; SYNC.state = 'ok'; SYNC.lastErr = ''; SYNC.busy = false; SYNC.lastCheck = Date.now(); renderSyncBtn();
+          return;
+        }
+        const cloud = await decodeCloud(fresh.content, { interactive: inter, allowForce: true });
         if (!validData(cloud)) throw new Error('BAD_DATA');
         const keysPush = mergeKeys(cloud);
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
@@ -563,6 +584,17 @@
     }
     SYNC.busy = false; SYNC.lastCheck = Date.now(); renderSyncBtn();
     if (UI.page === 'settings') renderPage();
+  }
+  /** 读取云端；如果读到的版本比本机上一次上传的还旧（GitHub 服务器延迟），等一下再读，最多 4 次 */
+  async function pullFresh() {
+    const lp = S().lastPush || {};
+    for (let i = 0; i < 4; i++) {
+      const r = await Api.gistPullMeta(S().gistToken, S().gistId);
+      const older = lp.at && r.updated && r.updated < lp.at;
+      if (!older) return r;
+      await new Promise(res => setTimeout(res, 1500 * (i + 1)));
+    }
+    return { stale: true };
   }
   /** 把 GitHub 错误码翻译成看得懂的原因 */
   function syncErrText(e, phase) {

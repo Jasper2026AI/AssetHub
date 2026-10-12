@@ -286,21 +286,26 @@
       catch (e) {
         // GitHub 偶尔“已经保存成功却返回 5xx”：读回来核对，内容一致就当作成功
         if (!/HTTP 5\d\d|Timeout/.test(String(e.message))) throw e;
-        try { if ((await gistPull(token, id)) === content) return id; } catch (e2) { /* ignore */ }
+        try { const r = await gistPullMeta(token, id); if (r.content === content) { gistPush.meta = { updated: r.updated, version: r.version }; return id; } } catch (e2) { /* ignore */ }
         throw e;
       }
     }
     else { body.public = false; j = await ghRetry(() => fetchJSON('https://api.github.com/gists', { method: 'POST', headers, body: JSON.stringify(body), timeout: 30000 })); }
+    // 记下这次上传在 GitHub 服务器上的时间和版本，用来识别之后读到的是不是更旧的副本
+    gistPush.meta = { updated: j.updated_at || '', version: (j.history && j.history[0] && j.history[0].version) || '' };
     return j.id;
   }
-  async function gistPull(token, id) {
+  /** 读取云端：内容 + 服务器上的更新时间 / 版本 */
+  async function gistPullMeta(token, id) {
     token = cleanToken(token); id = gistIdOf(id);
     const j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}?t=${Date.now()}`, { headers: gistHeaders(token), timeout: 30000, cache: 'no-store' }));
     const f = j.files && (j.files[GIST_FILE] || j.files['assetview.json'] || Object.values(j.files)[0]);
     if (!f) throw new Error('Empty gist');
-    if (f.truncated && f.raw_url) { const r = await fetch(f.raw_url, { cache: 'no-store' }); return await r.text(); }
-    return f.content;
+    let content = f.content;
+    if (f.truncated && f.raw_url) { const r = await fetch(f.raw_url, { cache: 'no-store' }); content = await r.text(); }
+    return { content, updated: j.updated_at || '', version: (j.history && j.history[0] && j.history[0].version) || '' };
   }
+  async function gistPull(token, id) { return (await gistPullMeta(token, id)).content; }
 
   /** Gist 历史版本（每次上传都会产生一个版本），新的在前 */
   async function gistHistory(token, id) {
@@ -326,6 +331,6 @@
   window.AVApi = {
     FX_SOURCES, CRYPTO_SOURCES, STOCK_SOURCES,
     fetchRates, cryptoQuote, cryptoPriceUSD, stockQuote, stockCcy, quoteAsset, quoteKind, canQuote, isGold, OZ_G,
-    gistPush, gistPull, gistIdOf, cleanToken, gistHistory, gistVersion, GOLD_SOURCES, goldQuote
+    gistPush, gistPull, gistPullMeta, gistIdOf, cleanToken, gistHistory, gistVersion, GOLD_SOURCES, goldQuote
   };
 })();
