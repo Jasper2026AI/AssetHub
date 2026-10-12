@@ -64,7 +64,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -369,20 +369,12 @@
         continue;
       }
       if (!opt.old) {
-        const h = await hashPass(r.cur);
-        if (!S().passHash || S().passHash === h) {                    // 新设备 / 密码本来就一样：直接采用
-          S().syncKey = raw; S().syncSalt = obj.salt; S().syncIter = obj.iter || ENC_ITER; S().passHash = h; S().passChangedAt = obj.pc || 0;
-          unlockFor(); save(); toast(t('passSynced'), 'ok');
-        } else {
-          // 本机密码和云端不同：以“最后修改的密码”为准；无法判断时问你
-          const lp = S().passChangedAt || 0, cp = obj.pc || 0;
-          const useLocal = lp !== cp ? lp > cp : await confirmDialog({ title: t('passPickT'), msg: t('passPickM'), ok: t('passUseLocal'), cancel: t('passUseCloud'), danger: false, noBackdrop: true });
-          if (useLocal) { SYNC.reenc = true; S().passChangedAt = Date.now(); save(); toast(t('passKeepLocal'), 'ok'); }   // 标记为最新，其他设备会自动采用
-          else {
-            S().syncKey = raw; S().syncSalt = obj.salt; S().syncIter = obj.iter || ENC_ITER; S().passHash = h; S().passChangedAt = cp;
-            unlockFor(); save(); toast(t('passSyncedChanged'), 'ok');
-          }
-        }
+        // 你输入的就是云端的密码：本设备改用它（和提示里说的一致），本机原来的密钥留着读取旧数据。
+        // 以前这里会在“本机密码更新”时保留本机密码并重新加密云端，导致两台设备来回改密码、反复要求输入。
+        const h = await hashPass(r.cur), changed = !!S().passHash && S().passHash !== h;
+        if (S().syncKey && S().syncKey !== raw) S().syncKeyPrev = [S().syncKey].concat(S().syncKeyPrev || []).filter((x, j, a) => a.indexOf(x) === j).slice(0, 5);
+        S().syncKey = raw; S().syncSalt = obj.salt; S().syncIter = obj.iter || ENC_ITER; S().passHash = h; S().passChangedAt = obj.pc || 0;
+        unlockFor(); save(); toast(t(changed ? 'passSyncedChanged' : 'passSynced'), 'ok');
       }
       return data;
     }

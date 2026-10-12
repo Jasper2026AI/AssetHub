@@ -295,7 +295,7 @@
   }
   async function gistPull(token, id) {
     token = cleanToken(token); id = gistIdOf(id);
-    const j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}`, { headers: gistHeaders(token), timeout: 30000 }));
+    const j = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}?t=${Date.now()}`, { headers: gistHeaders(token), timeout: 30000, cache: 'no-store' }));
     const f = j.files && (j.files[GIST_FILE] || j.files['assetview.json'] || Object.values(j.files)[0]);
     if (!f) throw new Error('Empty gist');
     if (f.truncated && f.raw_url) { const r = await fetch(f.raw_url, { cache: 'no-store' }); return await r.text(); }
@@ -307,7 +307,7 @@
     token = cleanToken(token); id = gistIdOf(id);
     const out = [];
     for (let page = 1; page <= 3; page++) {
-      const list = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}/commits?per_page=100&page=${page}`, { headers: gistHeaders(token), timeout: 30000 }));
+      const list = await ghRetry(() => fetchJSON(`https://api.github.com/gists/${encodeURIComponent(id)}/commits?per_page=100&page=${page}&t=${Date.now()}`, { headers: gistHeaders(token), timeout: 30000, cache: 'no-store' }));
       list.forEach(c => out.push({ sha: c.version, at: c.committed_at, add: (c.change_status || {}).additions || 0, del: (c.change_status || {}).deletions || 0 }));
       if (list.length < 100) break;
     }
