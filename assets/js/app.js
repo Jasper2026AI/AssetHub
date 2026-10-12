@@ -64,7 +64,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -90,6 +90,7 @@
     'chev-r': '<path d="M9 6l6 6-6 6"/>',
     'chev-l': '<path d="M15 6l-6 6 6 6"/>',
     'chev-d': '<path d="M6 9l6 6 6-6"/>',
+    'chev-u': '<path d="M6 15l6-6 6 6"/>',
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
     wallet: '<rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18M16 15h2"/><path d="M6 6l9-3 1.5 3"/>',
     in: '<path d="M12 4v12M6 10l6 6 6-6"/><path d="M5 20h14"/>',
@@ -255,7 +256,7 @@
     backupNow('pull');
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs; DB.subs = c.subs || [];
-    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
+    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
     // 每日快照：同一个 Gist 的两台设备互相合并；换了 Gist（另一个账本）就直接用云端的，不把旧账本的历史带进来
     const sameBook = S().snapsGist === S().gistId;
     const loc = DB.snaps;
@@ -2106,10 +2107,70 @@
   const SUB_CYCLES = ['month', 'quarter', 'year', 'once', 'custom'];
   const SUB_FIELDS = ['name', 'alias', 'account', 'site', 'cat', 'price', 'ccy', 'cycle', 'cycleN', 'cycleU', 'start', 'trialDays', 'expire', 'payId', 'remind', 'nextPrice', 'note', 'locked', 'icon'];
   const SUB_PERIODS = ['today', 'month', 'year', 'total'];
-  const subCatColor = c => (SUB_CAT_COLOR[c] != null ? SUB_CAT_COLOR[c] : SUB_EXTRA_COLORS[[...String(c)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % SUB_EXTRA_COLORS.length]);
-  const subCatName = c => (!c ? t('subCatNone') : SUB_CATS.includes(c) ? t('subCat_' + c) : c);
+  const subCatColorAuto = c => (SUB_CAT_COLOR[c] != null ? SUB_CAT_COLOR[c] : SUB_EXTRA_COLORS[[...String(c)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % SUB_EXTRA_COLORS.length]);
+  const subCatColor = c => { const x = c && (DB.meta.subCats || []).find(y => y.k === c); return x && x.c ? x.c : subCatColorAuto(c); };
+  const subCatName = c => { if (!c) return t('subCatNone'); const x = (DB.meta.subCats || []).find(y => y.k === c); return (x && x.n) || (SUB_CATS.includes(c) ? t('subCat_' + c) : c); };
   const findSub = id => (DB.subs || []).find(s => s.id === id);
-  const subCats = () => { const set = new Set(SUB_CATS); DB.subs.forEach(s => { if (s.cat) set.add(s.cat); }); return Array.from(set); };
+  /** 订阅分类列表（全部可改名 / 改颜色 / 排序 / 删除 / 新增，随账本一起云同步）：[{ k: 编号, n: 名称（空 = 预设名称）, c: 颜色 }] */
+  function subCatList() {
+    const m = DB.meta;
+    if (!Array.isArray(m.subCats)) m.subCats = SUB_CATS.map(k => ({ k, n: '', c: '' }));
+    DB.subs.forEach(s => { if (s.cat && !m.subCats.some(x => x.k === s.cat)) m.subCats.push({ k: s.cat, n: '', c: '' }); });   // 旧版本 / 其他设备用到的分类自动补进来
+    return m.subCats;
+  }
+  const subCats = () => subCatList().map(x => x.k);
+  /** 按名称找分类（不分大小写），没有就新建，返回分类编号 */
+  function findOrAddCat(name) {
+    name = String(name || '').trim(); if (!name) return '';
+    const list = subCatList(), hit = list.find(x => subCatName(x.k).toLowerCase() === name.toLowerCase());
+    if (hit) return hit.k;
+    const k = 'c' + uid(); list.push({ k, n: name, c: '' }); return k;
+  }
+  /** 分类管理（订阅弹窗里内嵌 / 订阅页单独弹窗共用） */
+  function catMgrHTML() {
+    const list = subCatList();
+    return list.map((x, i) => { const n = DB.subs.filter(s => s.cat === x.k).length; return `<div class="cm-row" data-c="${esc(x.k)}">
+        <label class="cm-color" style="--cc:${subCatColor(x.k)}" title="${t('subCatColor')}"><input type="color" value="${subCatColor(x.k)}" data-cm-color></label>
+        <input class="input" value="${esc(subCatName(x.k))}" maxlength="20" data-cm-name>
+        <span class="dim">${t('subNSubs', { n })}</span>
+        <button type="button" class="icon-btn sm" data-cm-mv="-1" ${i ? '' : 'disabled'} title="${t('moveUp')}">${ic('chev-u')}</button>
+        <button type="button" class="icon-btn sm" data-cm-mv="1" ${i < list.length - 1 ? '' : 'disabled'} title="${t('moveDown')}">${ic('chev-d')}</button>
+        <button type="button" class="icon-btn sm" data-cm-del title="${t('del')}">${ic('trash')}</button></div>`; }).join('') +
+      `<div class="cm-add"><input class="input" maxlength="20" placeholder="${t('subCatNewPh')}" data-cm-new><button type="button" class="btn btn-glass sm" data-cm-add>${ic('plus')}${t('subCatAdd')}</button></div>
+      <p class="hint">${t('subCatManageHint')}</p>`;
+  }
+  function bindCatMgr(box, onChange) {
+    const draw = () => { box.querySelector('.cm-body').innerHTML = catMgrHTML(); };
+    const done = () => { commit(); draw(); if (onChange) onChange(); };
+    const keyOf = el => el.closest('.cm-row').dataset.c, itemOf = k => subCatList().find(x => x.k === k);
+    box.addEventListener('click', async e => {
+      const mv = e.target.closest('[data-cm-mv]');
+      if (mv && !mv.disabled) { const list = subCatList(), i = list.findIndex(x => x.k === keyOf(mv)), j = i + +mv.dataset.cmMv; [list[i], list[j]] = [list[j], list[i]]; done(); return; }
+      if (e.target.closest('[data-cm-add]')) {
+        const inp = box.querySelector('[data-cm-new]'), name = inp.value.trim(); if (!name) { inp.focus(); return; }
+        const had = subCats().length; findOrAddCat(name);
+        if (subCats().length === had) toast(t('subCatExists'), 'err'); else done();
+        return;
+      }
+      const del = e.target.closest('[data-cm-del]'); if (!del) return;
+      const k = keyOf(del), name = subCatName(k), n = DB.subs.filter(x => x.cat === k).length;
+      if (!(await confirmDialog({ title: t('subCatDelT'), msg: t('subCatDelM', { c: esc(name), n }), ok: t('del') }))) return;
+      DB.subs.filter(x => x.cat === k).forEach(x => { logOp('sub', x, 'edit', [['cat', name, '']]); x.cat = ''; });
+      DB.meta.subCats = subCatList().filter(x => x.k !== k);
+      done(); toast(t('subCatDeleted', { c: name }), 'ok');
+    });
+    box.addEventListener('change', e => {
+      const nm = e.target.closest('[data-cm-name]'), cl = e.target.closest('[data-cm-color]');
+      if (nm) { const x = itemOf(keyOf(nm)), v = nm.value.trim(); if (!v) { nm.value = subCatName(x.k); return; } x.n = v; done(); }
+      if (cl) { itemOf(keyOf(cl)).c = cl.value; done(); }
+    });
+    box.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest('[data-cm-new]')) { e.preventDefault(); box.querySelector('[data-cm-add]').click(); } });
+    draw();
+  }
+  function openCatMgr() {
+    openModal({ title: t('subCatManage'), body: `<div class="cat-mgr solo"><div class="cm-body"></div></div>`, footer: `<button class="btn btn-accent" data-modal-close>${ic('check')}${t('done')}</button>`,
+      onMount(m) { bindCatMgr($('.cat-mgr', m), () => { if (UI.page === 'subs') renderSubs(); }); } });
+  }
   const dOf = k => new Date(k + 'T00:00:00');
   /** 日期加减：月 / 年按日历走（1 月 31 日 + 1 个月 = 2 月 28 日） */
   function addDate(k, n, u) {
@@ -2287,7 +2348,7 @@
         <div class="seg" title="${t('subPmodeTip')}"><button class="${U.pmode !== 'month' ? 'on' : ''}" data-action="sub-pmode" data-v="cycle">${t('subPmCycle')}</button><button class="${U.pmode === 'month' ? 'on' : ''}" data-action="sub-pmode" data-v="month">${t('subPmMonth')}</button></div>
         ${colBtnHTML('sub')}
       </div>
-      <div class="chips mb">${chips}</div>
+      <div class="chips mb">${chips}<button class="chip chip-tool" data-action="sub-cats">${ic('sliders')}${t('subCatManageS')}</button></div>
       <div id="batch-bar"></div>
       <div id="sub-body"></div>`;
     drawSubCharts(pays);
@@ -2533,8 +2594,7 @@
   /* ---- 新增 / 编辑订阅 ---- */
   function subCatOptions(sel) {
     const list = subCats();
-    return `<option value="" ${!sel ? 'selected' : ''}>${t('subCatNone')}</option>` + list.map(c => `<option value="${esc(c)}" ${sel === c ? 'selected' : ''}>${esc(subCatName(c))}</option>`).join('') + `<option value="__custom">${t('subCatCustom')}…</option>` +
-      (list.some(c => !SUB_CATS.includes(c)) ? `<option value="__manage">${t('subCatManage')}…</option>` : '');
+    return `<option value="" ${!sel ? 'selected' : ''}>${t('subCatNone')}</option>` + list.map(c => `<option value="${esc(c)}" ${sel === c ? 'selected' : ''}>${esc(subCatName(c))}</option>`).join('') + `<option value="__custom">${t('subCatCustom')}…</option><option value="__manage">${t('subCatManage')}…</option>`;
   }
   function openSubModal(id) {
     const ex = id ? findSub(id) : null;
@@ -2624,38 +2684,19 @@
           preview();
         });
         $('#sf-remind', m).addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; st.remind = +b.dataset.v; $$('#sf-remind button', m).forEach(x => x.classList.toggle('on', x === b)); });
-        // 自定义分类管理：改名 / 删除（删除后用到它的订阅变成未分类）
+        // 分类管理（全部分类都能改名 / 改颜色 / 排序 / 删除 / 新增）
         let catPrev = st.cat || '';
-        const drawMgr = () => {
-          const customs = subCats().filter(c => !SUB_CATS.includes(c)), box = $('#sf-cat-mgr', m);
-          box.innerHTML = `<div class="cm-h"><b>${t('subCatManage')}</b><button type="button" class="link" data-cm-close>${t('close')}</button></div>` + (customs.length ? customs.map(c => {
-            const n = DB.subs.filter(x => x.cat === c).length;
-            return `<div class="cm-row" data-c="${esc(c)}"><i class="cdot" style="background:${subCatColor(c)}"></i><input class="input" value="${esc(c)}" maxlength="20" data-cm-name><span class="dim">${t('subNSubs', { n })}</span><button type="button" class="icon-btn sm" data-cm-del title="${t('del')}">${ic('trash')}</button></div>`;
-          }).join('') : `<p class="dim">${t('subCatNoCustom')}</p>`) + `<p class="hint">${t('subCatManageHint')}</p>`;
-        };
-        const refreshCats = () => { const sel = $('#sf-cat', m), cur = sel.value; sel.innerHTML = subCatOptions(subCats().includes(catPrev) || !catPrev ? catPrev : ''); if (cur && cur !== '__manage' && cur !== '__custom') sel.value = subCats().includes(cur) ? cur : ''; };
-        const renameCat = (from, to) => {
-          to = to.trim(); if (!to || to === from) return;
-          DB.subs.filter(x => x.cat === from).forEach(x => { logOp('sub', x, 'edit', [['cat', from, to]]); x.cat = to; });
-          if (catPrev === from) catPrev = to;
-          commit(); refreshCats(); drawMgr(); toast(t('saved'), 'ok');
-        };
+        const refreshCats = () => { const sel = $('#sf-cat', m); sel.innerHTML = subCatOptions(subCats().includes(catPrev) ? catPrev : ''); };
+        const mgr = $('#sf-cat-mgr', m);
+        mgr.innerHTML = `<div class="cm-h"><b>${t('subCatManage')}</b><button type="button" class="link" data-cm-close>${t('close')}</button></div><div class="cm-body"></div>`;
+        bindCatMgr(mgr, refreshCats);
+        mgr.addEventListener('click', e => { if (e.target.closest('[data-cm-close]')) mgr.style.display = 'none'; });
         $('#sf-cat', m).addEventListener('change', e => {
           const v = e.target.value;
-          if (v === '__manage') { e.target.value = catPrev; drawMgr(); $('#sf-cat-mgr', m).style.display = ''; return; }
+          if (v === '__manage') { e.target.value = catPrev; mgr.querySelector('.cm-body').innerHTML = catMgrHTML(); mgr.style.display = ''; return; }
           if (v !== '__custom') catPrev = v;
           const c = v === '__custom'; $('#sf-cat-c', m).style.display = c ? '' : 'none'; if (c) $('#sf-cat-c', m).focus();
         });
-        $('#sf-cat-mgr', m).addEventListener('click', async e => {
-          if (e.target.closest('[data-cm-close]')) { $('#sf-cat-mgr', m).style.display = 'none'; return; }
-          const del = e.target.closest('[data-cm-del]'); if (!del) return;
-          const c = del.closest('.cm-row').dataset.c, n = DB.subs.filter(x => x.cat === c).length;
-          if (!(await confirmDialog({ title: t('subCatDelT'), msg: t('subCatDelM', { c: esc(c), n }), ok: t('del') }))) return;
-          DB.subs.filter(x => x.cat === c).forEach(x => { logOp('sub', x, 'edit', [['cat', c, '']]); x.cat = ''; });
-          if (catPrev === c) catPrev = '';
-          commit(); refreshCats(); drawMgr(); toast(t('subCatDeleted', { c }), 'ok');
-        });
-        $('#sf-cat-mgr', m).addEventListener('change', e => { const inp = e.target.closest('[data-cm-name]'); if (inp) renameCat(inp.closest('.cm-row').dataset.c, inp.value); });
         ['#sf-price', '#sf-cn', '#sf-start', '#sf-trial'].forEach(q => $(q, m).addEventListener('input', preview));
         ['#sf-cu', '#sf-ccy'].forEach(q => $(q, m).addEventListener('change', preview));
         $('#sf-ccy-o', m).addEventListener('input', preview);
@@ -2676,7 +2717,8 @@
           if (!validCcy(r.ccy)) { toast(t('errRate', { c: r.ccy }), 'err'); return; }
           if (!r.start) { toast(t('errDate'), 'err'); return; }
           let cat = $('#sf-cat', m).value;
-          if (cat === '__custom') { cat = $('#sf-cat-c', m).value.trim(); if (!cat) { toast(t('subErrCat'), 'err'); $('#sf-cat-c', m).focus(); return; } }
+          if (cat === '__custom') { const nm = $('#sf-cat-c', m).value.trim(); if (!nm) { toast(t('subErrCat'), 'err'); $('#sf-cat-c', m).focus(); return; } cat = findOrAddCat(nm); }
+          if (cat === '__manage') cat = catPrev;
           const buy = r.cycle === 'once', forever = buy || $('#sf-forever', m).checked, expire = forever ? '' : $('#sf-expire', m).value;
           if (buy) { r.trialDays = 0; st.remind = 0; }   // 买断：没有试用期、过期时间和提醒
           let site = $('#sf-site', m).value.trim();
@@ -3179,7 +3221,7 @@
           <div class="tf-new-h">${ic('plus')}<b>${t('subNewT')}</b><small>${t('subNewSub')}</small></div>
           <div class="row2">
             <div class="field"><label>${t('subName')}</label><input class="input" id="tn-sname" maxlength="40" placeholder="${t('subNamePh')}"></div>
-            <div class="field"><label>${t('subColCat')}</label><select class="input" id="tn-scat">${subCatOptions('')}</select><input class="input" id="tn-scat-c" maxlength="20" placeholder="${t('subCatCustomPh')}" style="display:none;margin-top:8px"></div>
+            <div class="field"><label>${t('subColCat')}</label><select class="input" id="tn-scat">${subCatOptions('').replace(/<option value="__manage">[^<]*<\/option>/, '')}</select><input class="input" id="tn-scat-c" maxlength="20" placeholder="${t('subCatCustomPh')}" style="display:none;margin-top:8px"></div>
           </div>
           <div class="field" style="margin-bottom:6px"><label>${t('subColCycle')}</label><div class="seg seg-full" id="tn-scyc">${['month', 'quarter', 'year', 'once'].map(c => `<button type="button" data-v="${c}" class="${c === 'month' ? 'on' : ''}">${t('cyc_' + c)}</button>`).join('')}</div></div>
         </div>
@@ -3439,7 +3481,8 @@
           }
           const subV = st.type === 'expense' ? $('#tf-sub', m).value : '';
           let subCat = $('#tn-scat', m).value;
-          if (subCat === '__custom') subCat = $('#tn-scat-c', m).value.trim();
+          if (subCat === '__custom') subCat = findOrAddCat($('#tn-scat-c', m).value);
+          if (subCat === '__manage') subCat = '';
           if (subV === '__new' && !$('#tn-sname', m).value.trim()) { toast(t('subErrName'), 'err'); $('#tn-sname', m).focus(); return; }
           if (subV && subRenew === 'custom' && !$('#tf-sub-date', m).value) { toast(t('errDate'), 'err'); return; }
           const tx = ex || { id: uid(), createdAt: Date.now() };
@@ -4158,6 +4201,7 @@
     'add-asset'() { openAssetModal(); },
     'add-sub'() { openSubModal(); },
     cols(el) { openColsModal(el.dataset.v); },
+    'sub-cats'() { openCatMgr(); },
     async 'edit-sub'(el) {
       const s = findSub(el.dataset.id); if (!s) return;
       if (!(await requireUnlock(s.locked ? t('verifyLockedMsg') : t('verifySubMsg'), s.locked))) return;
