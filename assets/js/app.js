@@ -64,7 +64,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -313,10 +313,17 @@
     S().syncKey = await deriveKeyRaw(pw, salt, ENC_ITER); S().syncSalt = salt; S().syncIter = ENC_ITER;
   }
   // gzip 压缩（浏览器支持时）→ 加密 → base64 分行保存：体积约为原来的 1/5，且不会出现超长单行
-  const canZip = () => typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
-  async function zipBytes(bytes, mode) {
+  // 压缩 / 解压优先用打包进来的 pako（各浏览器结果一致）；浏览器自带的 CompressionStream 在部分 iPhone 上处理大数据会出错
+  const hasStreams = () => typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
+  const canZip = () => !!window.pako || hasStreams();
+  async function streamZip(bytes, mode) {
     const st = new Blob([bytes]).stream().pipeThrough(mode === 'gzip' ? new CompressionStream('gzip') : new DecompressionStream('gzip'));
     return new Uint8Array(await new Response(st).arrayBuffer());
+  }
+  async function zipBytes(bytes, mode) {
+    if (mode === 'gzip') return window.pako ? window.pako.gzip(bytes) : streamZip(bytes, 'gzip');
+    if (window.pako) { try { return window.pako.ungzip(bytes); } catch (e) { if (!hasStreams()) throw e; } }   // 解压失败再换一种方式试
+    return streamZip(bytes, 'gunzip');
   }
   /** 本设备的名字和编号（写进云端数据的明文头，方便看出是哪台设备上传的；不包含任何个人数据） */
   function devInfo() {
@@ -327,19 +334,37 @@
     return { id: S().devId, name: `${os} ${app ? 'App' : (/Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /Firefox\//.test(ua) ? 'Firefox' : 'Web')}` };
   }
   async function encodeCloud(text) {
-    const iv = crypto.getRandomValues(new Uint8Array(12)), z = canZip(), dv = devInfo();
-    let bytes = new TextEncoder().encode(text);
-    if (z) bytes = await zipBytes(bytes, 'gzip');
-    const ct = b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(S().syncKey), bytes));
-    const lines = ct.match(/.{1,100}/g) || [''];
-    const head = JSON.stringify({ assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, pc: S().passChangedAt || 0, z: z ? 'gzip' : '', iv: b64(iv), dev: dv.id, dn: dv.name, ts: Date.now() });
-    return head.slice(0, -1) + ',"data":[\n' + lines.map(l => JSON.stringify(l)).join(',\n') + '\n]}';
+    const dv = devInfo();
+    // 上传前先在本机解开一遍核对：读回来和原文一模一样才上传；压缩版核对不通过就改传不压缩的
+    for (const z of canZip() ? [true, false] : [false]) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      let bytes = new TextEncoder().encode(text);
+      if (z) bytes = await zipBytes(bytes, 'gzip');
+      const ct = b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(S().syncKey), bytes));
+      const lines = ct.match(/.{1,100}/g) || [''];
+      const head = { assethub: 'enc1', salt: S().syncSalt, iter: S().syncIter || ENC_ITER, pc: S().passChangedAt || 0, z: z ? 'gzip' : '', iv: b64(iv), dev: dv.id, dn: dv.name, ts: Date.now() };
+      let ok = false;
+      try { ok = (await decryptWith(S().syncKey, Object.assign({}, head, { data: lines }))) === text; } catch (e) { ok = false; }
+      if (ok) return JSON.stringify(head).slice(0, -1) + ',"data":[\n' + lines.map(l => JSON.stringify(l)).join(',\n') + '\n]}';
+    }
+    throw new Error('ENC_VERIFY');
   }
+  /** 解密：密钥不对抛 KEY；密钥对了但解压 / 读取失败抛 CORRUPT（不是密码问题，不该再要密码） */
   async function decryptWith(raw, env) {
     const data = Array.isArray(env.data) ? env.data.join('') : env.data;
-    let pt = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, await aesKey(raw), unb64(data)));
-    if (env.z === 'gzip') pt = await zipBytes(pt, 'gunzip');
-    return new TextDecoder().decode(pt);
+    let pt;
+    try { pt = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, await aesKey(raw), unb64(data))); }
+    catch (e) { throw new Error('KEY'); }
+    try {
+      if (env.z === 'gzip') pt = await zipBytes(pt, 'gunzip');
+      return new TextDecoder().decode(pt);
+    } catch (e) { throw new Error('CORRUPT'); }
+  }
+  /** 用某个密钥打开云端数据：密钥不对返回 null；数据坏了抛 CORRUPT */
+  async function openWith(raw, env) {
+    let txt;
+    try { txt = await decryptWith(raw, env); } catch (e) { if (e.message === 'KEY') return null; throw e; }
+    try { return JSON.parse(txt); } catch (e) { throw new Error('CORRUPT'); }
   }
   const isEnc = o => !!(o && o.assethub === 'enc1' && o.data);
   /** 上传前确保有加密密钥：没有密码先设密码，有密码就输入一次 */
@@ -352,17 +377,27 @@
     if ((await hashPass(r.cur)) !== S().passHash) throw new Error('PASS_WRONG');
     await setSyncKey(r.cur); save();
   }
+  /** 密码 / 密钥正确，但云端这份数据解压或读取失败：说明原因，提供“用本机重新上传”（上传前会核对能正常打开） */
+  async function corruptFlow(e, opt) {
+    if (e.message !== 'CORRUPT') throw e;
+    if (!opt.old && opt.allowForce && opt.interactive) {
+      const go = await confirmDialog({ title: t('cloudCorruptT'), msg: t('cloudCorruptM'), ok: t('cloudForcePush'), cancel: t('cancel'), danger: true, noBackdrop: true });
+      if (go) throw new Error('FORCE_PUSH');
+      throw new Error('CANCEL');
+    }
+    throw e;
+  }
   /** 云端文本 → 数据对象。加密数据先用本机密钥解；解不开（新设备 / 别的设备改过密码）就请你输入密码。
       opt.old = 读取历史版本：只解密，不改本机密码 */
   async function decodeCloud(text, opt) {
     opt = opt || {};
     const obj = JSON.parse(text);
     if (!isEnc(obj)) return obj;
-    if (S().syncKey) { try { return JSON.parse(await decryptWith(S().syncKey, obj)); } catch (e) { /* 密钥不对 */ } }
-    // 云端还是用本机以前的密码加密的：用本机记住的旧密钥解开，之后用现在的密码重新加密上传
-    for (const pk of (S().syncKeyPrev || [])) {
-      try { const d = JSON.parse(await decryptWith(pk, obj)); if (!opt.old) SYNC.reenc = true; return d; } catch (e) { /* 继续 */ }
-    }
+    try {
+      if (S().syncKey) { const d = await openWith(S().syncKey, obj); if (d) return d; }
+      // 云端还是用本机以前的密码加密的：用本机记住的旧密钥解开，之后用现在的密码重新加密上传
+      for (const pk of (S().syncKeyPrev || [])) { const d = await openWith(pk, obj); if (d) { if (!opt.old) SYNC.reenc = true; return d; } }
+    } catch (e) { return corruptFlow(e, opt); }
     if (!opt.interactive) throw new Error('NEED_PASS');
     const who = obj.dev ? (obj.dev === S().devId ? t('cloudByThis') : `${esc(obj.dn || '?')}（${esc(obj.dev)}）`) : '';
     const pcTxt = (obj.pc ? '<br><span class="dim">' + t('cloudPassPc', { d: fullTime(obj.pc) }) + '</span>' : '') +
@@ -372,8 +407,12 @@
       const r = await passDialog(t('cloudPassT'), (i ? t('passWrongRetry') : t(opt.old ? 'cloudPassOldM' : 'cloudPassM')) + pcTxt, ['cur']);
       if (!r) throw new Error('CANCEL');
       let raw, data;
-      try { raw = await deriveKeyRaw(r.cur, obj.salt, obj.iter); data = JSON.parse(await decryptWith(raw, obj)); }
-      catch (e) {
+      try {
+        raw = await deriveKeyRaw(r.cur, obj.salt, obj.iter);
+        try { data = await openWith(raw, obj); } catch (e2) { return corruptFlow(e2, opt); }
+        if (!data) throw new Error('KEY');
+      } catch (e) {
+        if (e.message === 'FORCE_PUSH' || e.message === 'CORRUPT' || e.message === 'CANCEL') throw e;
         // 输入的是本机锁定密码却解不开：云端是用另一个密码加密的，说明原因并给出“用本机覆盖云端”的办法
         if (!opt.old && opt.allowForce && S().passHash && (await hashPass(r.cur)) === S().passHash) {
           const force = await confirmDialog({ title: t('cloudOtherPassT'), msg: t('cloudOtherPassM', { d: obj.pc ? fullTime(obj.pc) : '—' }), ok: t('cloudForcePush'), cancel: t('cloudTryOther'), danger: true, noBackdrop: true });
@@ -603,6 +642,8 @@
     if (m === 'CANCEL') return t('syncCanceled');
     if (m === 'DEMO_BLOCK') return t('syncDemoBlock');
     if (m === 'PASS_WRONG') return t('passWrong');
+    if (m === 'CORRUPT') return t('syncCorrupt');
+    if (m === 'ENC_VERIFY') return t('syncEncVerify');
     if (m === 'BAD_DATA') return t('importBad');
     if (code === '401') return t('syncE401');
     if (code === '404') return t('syncE404');
