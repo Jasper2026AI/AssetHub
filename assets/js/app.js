@@ -64,7 +64,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1799,11 +1799,105 @@
         <label class="mini-select">${ic('sort')}<select data-change="holdSort">${['valDesc', 'valAsc', 'dayDesc', 'dayAsc', 'pnlDesc', 'pnlAsc'].map(v => `<option value="${v}" ${H.sort === v ? 'selected' : ''}>${t('sort_' + v)}</option>`).join('')}</select></label>
         <span class="src-tool">${srcFilterHTML(false)}</span>
         <span class="src-tool">${whFilterHTML(false)}</span>
+        ${colBtnHTML('hold')}
       </div>
       <div class="chips mb">${chips}</div>
       <div id="batch-bar"></div>
       <div id="hold-body"></div>`;
     renderHoldBody();
+  }
+  /* ---- 表格列设置：顺序 / 显示 / 宽度（保存在本设备） ----
+     defs: [{ k, label, th, thCls, thAttr, td(row), tdCls, fixed }]；fixed = 不能隐藏、不能移动（操作列固定在最后） */
+  function colState(tid, defs) {
+    const c = (S().cols || {})[tid] || {}, all = defs.map(d => d.k), fixedK = defs.filter(d => d.fixed).map(d => d.k);
+    const order = (c.order || []).filter(k => all.includes(k) && !fixedK.includes(k));
+    all.forEach((k, i) => { if (!order.includes(k) && !fixedK.includes(k)) order.splice(Math.min(i, order.length), 0, k); });   // 新增的列放回默认位置
+    const hidden = (c.hidden || []).filter(k => all.includes(k) && !fixedK.includes(k));
+    const cols = order.concat(fixedK).map(k => defs.find(d => d.k === k)).filter(d => !hidden.includes(d.k));
+    return { cols, order, hidden, widths: c.widths || null };
+  }
+  function tableHTML(tid, defs, rows, o) {
+    const st = colState(tid, defs), w = st.widths, sel = o.sel;
+    const sum = w ? st.cols.reduce((a, d) => a + (w[d.k] || 120), o.batch ? 44 : 0) : 0;
+    const allSel = rows.length && rows.every(r => sel.has(o.id(r)));
+    return `<div class="card glass table-card"><div class="table-wrap"><table class="tbl ${o.cls || ''} ${w ? 'fixed' : ''}" data-tid="${tid}" ${w ? `style="width:${sum}px"` : ''}>
+      <colgroup>${o.batch ? '<col style="width:44px">' : ''}${st.cols.map(d => `<col data-k="${d.k}" ${w ? `style="width:${w[d.k] || 120}px"` : ''}>`).join('')}</colgroup>
+      <thead><tr>${o.batch ? `<th class="ckc"><label class="ck"><input type="checkbox" data-sel-all="${o.kind}" ${allSel ? 'checked' : ''}><i></i></label></th>` : ''}${st.cols.map(d =>
+        `<th class="${d.thCls || ''}" data-k="${d.k}" ${d.thAttr || ''}>${d.th}${d.fixed ? '' : `<span class="col-rs" data-rs="${d.k}" title="${t('colResize')}"></span>`}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr class="${sel.has(o.id(r)) ? 'sel' : ''} ${o.rowCls ? o.rowCls(r) : ''}">${o.batch ? `<td class="ckc"><label class="ck"><input type="checkbox" data-sel="${o.kind}" value="${o.id(r)}" ${sel.has(o.id(r)) ? 'checked' : ''}><i></i></label></td>` : ''}${st.cols.map(d =>
+        `<td class="${typeof d.tdCls === 'function' ? d.tdCls(r) : d.tdCls || ''}">${d.td(r)}</td>`).join('')}</tr>`).join('')}</tbody>
+      <tfoot><tr>${o.batch ? '<td></td>' : ''}${st.cols.map((d, i) => `<td class="${o.foot[d.k] ? (d.tdCls && typeof d.tdCls === 'string' ? d.tdCls : 'r num') : ''} ${i === 0 ? 'foot-l' : ''}">${i === 0 ? `<span class="foot-lbl">${o.footLabel}</span>` : ''}${o.foot[d.k] || ''}</td>`).join('')}</tr></tfoot>
+    </table></div></div>`;
+  }
+  /** 拖动表头右边缘调整列宽：第一次拖动时记下所有列的当前宽度，之后表格按固定列宽显示 */
+  function startColResize(e, h) {
+    e.preventDefault(); e.stopPropagation();
+    const table = h.closest('table'), tid = table.dataset.tid, k = h.dataset.rs;
+    S().cols = S().cols || {};
+    const c = S().cols[tid] = S().cols[tid] || {};
+    if (!c.widths) { c.widths = {}; $$('thead th[data-k]', table).forEach(th => { c.widths[th.dataset.k] = Math.round(th.getBoundingClientRect().width); }); }
+    const apply = () => {
+      table.classList.add('fixed');
+      let sum = $('thead .ckc', table) ? 44 : 0;
+      $$('col[data-k]', table).forEach(col => { const v = c.widths[col.dataset.k] || 120; col.style.width = v + 'px'; sum += v; });
+      table.style.width = sum + 'px';
+    };
+    apply();
+    const x0 = e.clientX, w0 = c.widths[k] || 120;
+    h.classList.add('on');
+    const move = ev => { c.widths[k] = Math.max(44, Math.round(w0 + ev.clientX - x0)); apply(); };
+    const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); h.classList.remove('on'); UI.colDragAt = Date.now(); save(); };
+    document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+  }
+  /** 列设置弹窗：上下移动 = 表格里左右位置；勾选 = 显示 / 隐藏 */
+  function openColsModal(tid) {
+    const defs = (tid === 'hold' ? holdCols() : subCols()).filter(d => !d.fixed), st = colState(tid, defs.concat([]));
+    const order = st.order.slice(), hidden = new Set(st.hidden);
+    const draw = m => {
+      $('#cl-list', m).innerHTML = order.map((k, i) => { const d = defs.find(x => x.k === k); return `<div class="cl-row ${hidden.has(k) ? 'off' : ''}" data-k="${k}">
+        <label class="cl-ck"><input type="checkbox" ${hidden.has(k) ? '' : 'checked'} ${d.lock ? 'disabled' : ''} data-ck="${k}"><span>${esc(d.label)}</span>${d.lock ? `<em>${t('colAlways')}</em>` : ''}</label>
+        <button type="button" class="icon-btn sm" data-mv="-1" data-i="${i}" ${i ? '' : 'disabled'} title="${t('colLeft')}">${ic('chev-l')}</button>
+        <button type="button" class="icon-btn sm" data-mv="1" data-i="${i}" ${i < order.length - 1 ? '' : 'disabled'} title="${t('colRight')}">${ic('chev-r')}</button></div>`; }).join('');
+    };
+    openModal({
+      title: `${t('colSettings')} · ${t(tid === 'hold' ? 'holdTitle' : 'subTitle')}`,
+      body: `<p class="hint" style="margin:0 0 12px">${t('colSettingsHint')}</p><div id="cl-list" class="cl-list"></div>
+        <div class="cl-tools"><button type="button" class="btn btn-glass sm" id="cl-w">${ic('refresh')}${t('colResetW')}</button><button type="button" class="btn btn-glass sm" id="cl-all">${ic('refresh')}${t('colResetAll')}</button></div>`,
+      footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" id="cl-save">${ic('check')}${t('save')}</button>`,
+      onMount(m) {
+        draw(m);
+        $('#cl-list', m).addEventListener('click', e => {
+          const b = e.target.closest('[data-mv]'); if (!b || b.disabled) return;
+          const i = +b.dataset.i, j = i + +b.dataset.mv; [order[i], order[j]] = [order[j], order[i]]; draw(m);
+        });
+        $('#cl-list', m).addEventListener('change', e => { const k = e.target.dataset.ck; if (!k) return; e.target.checked ? hidden.delete(k) : hidden.add(k); draw(m); });
+        const done = cfg => { S().cols = S().cols || {}; if (cfg) S().cols[tid] = cfg; else delete S().cols[tid]; save(); closeModal(); selRender(tid === 'hold' ? 'hold' : 'sub'); toast(t('saved'), 'ok'); };
+        $('#cl-w', m).addEventListener('click', () => done(Object.assign({}, (S().cols || {})[tid] || {}, { order, hidden: Array.from(hidden), widths: null })));
+        $('#cl-all', m).addEventListener('click', () => done(null));
+        $('#cl-save', m).addEventListener('click', () => done({ order, hidden: Array.from(hidden), widths: ((S().cols || {})[tid] || {}).widths || null }));
+      }
+    });
+  }
+  const colBtnHTML = tid => `<button class="btn btn-glass sm col-btn" data-action="cols" data-v="${tid}" title="${t('colSettings')}">${ic('sliders')}${t('colSettings')}</button>`;
+  /* ---- 资产明细的列 ---- */
+  function holdCols() {
+    const H = UI.hold, D = S().ccy;
+    const sortTh = (k, label) => ({ thCls: `r sortable ${H.sort === k + 'Desc' || H.sort === k + 'Asc' ? 'on' : ''}`, thAttr: `data-action="hold-sort-head" data-v="${k}"`, th: `${label}<span class="arr">${H.sort === k + 'Asc' ? '↑' : '↓'}</span>` });
+    const cc = r => ({ a: r.a, ccy: aCcy(r.a), bal: isBalance(r.a), orig: aCcy(r.a) !== D });
+    return [
+      { k: 'name', label: t('colNameOnly'), lock: true, th: t('colNameOnly'), td: r => `<div class="nmcell"><b class="nm-pill" style="--tc:${CLASS_COLOR[primary(r.a)]}">${esc(r.a.name)}</b>${r.a.locked ? ic('lock', 'lk') : ''}</div>${r.a.note ? `<small>${esc(r.a.note)}</small>` : ''}` },
+      { k: 'code', label: t('colCode'), th: t('colCode'), td: r => (r.a.code ? `<span class="code">${esc(r.a.code)}</span>` : '<span class="dim">—</span>') },
+      { k: 'cls', label: t('colClass'), th: t('colClass'), td: r => `<div class="tags">${tagHTML(r.a)}</div>` },
+      { k: 'wh', label: t('colWh'), th: whFilterHTML(true), tdCls: 'wh', td: r => (r.a.warehouse ? esc(r.a.warehouse) : '<span class="dim">—</span>') },
+      { k: 'qty', label: t('colQty'), th: t('colQty'), thCls: 'r', tdCls: 'r num', td: r => `${qtyStr(r.a)}${unitSuffix(r.a)}` },
+      { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: 8 }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: 8 })}</small>` : ''); } },
+      { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: 8 }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: 8 })}</small>` : ''); } },
+      Object.assign({ k: 'val', label: t('colValue'), tdCls: r => `r num strong ${r.v < 0 ? 'down' : ''}`, td: r => { const x = cc(r); return `${money(r.v, { max: 8 })}${x.orig ? `<small>${money(aVal(r.a), { ccy: x.ccy, max: 8 })}</small>` : ''}`; } }, sortTh('val', t('colValue'))),
+      Object.assign({ k: 'day', label: t('colDay'), tdCls: r => `r num ${upDown(r.day)}`, td: r => `${dayCell(r.day, r.dayPct)}${resetDayBtn(r.a, r.day)}` }, sortTh('day', t('colDay'))),
+      Object.assign({ k: 'pnl', label: t('colPnl'), tdCls: r => `r num ${isBalance(r.a) ? 'dim' : upDown(r.pnl)}`, td: r => { if (isBalance(r.a)) return t('noPnl'); const c = aCostD(r.a); return `${money(r.pnl, { sign: true })}<small class="${upDown(r.pnl)}">${pct(c ? (r.pnl / Math.abs(c)) * 100 : 0)}</small>`; } }, sortTh('pnl', t('colPnl'))),
+      { k: 'src', label: t('colSrc'), th: srcFilterHTML(true), td: r => `<div class="srccell">${srcCell(r.a)}</div>` },
+      { k: 'ops', label: t('colOps'), fixed: true, th: t('colOps'), thCls: 'c', tdCls: 'c', td: r => (H.batch ? '' : `<div class="ops icon-ops">${histBtn('asset', r.a.id)}${quickBtn(r.a, true)}<button class="op edit" data-action="edit-asset" data-id="${r.a.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-asset" data-id="${r.a.id}" title="${t('del')}">${ic('trash')}</button></div>`) }
+    ];
   }
   function sortHead(key, label) {
     const H = UI.hold, desc = key + 'Desc', asc = key + 'Asc';
@@ -1838,34 +1932,13 @@
       }).join('')}</div>`;
     } else {
       let sumV = 0, sumC = 0, sumHV = 0, sumDay = 0;
-      const tr = rows.map(({ a, v, pnl, day, dayPct }) => {
-        const ccy = aCcy(a), bal = isBalance(a), c = aCostD(a), orig = ccy !== D;
-        sumV += v; sumDay += day; if (!bal) { sumC += c; sumHV += v; }
-        return `<tr class="${H.sel.has(a.id) ? 'sel' : ''}">
-          ${H.batch ? `<td class="ckc"><label class="ck"><input type="checkbox" data-sel="hold" value="${a.id}" ${H.sel.has(a.id) ? 'checked' : ''}><i></i></label></td>` : ''}
-          <td><div class="nmcell"><b class="nm-pill" style="--tc:${CLASS_COLOR[primary(a)]}">${esc(a.name)}</b>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}</div>${a.note ? `<small>${esc(a.note)}</small>` : ''}</td>
-          <td><div class="tags">${tagHTML(a)}</div></td>
-          <td class="wh">${a.warehouse ? esc(a.warehouse) : '<span class="dim">—</span>'}</td>
-          <td class="r num">${qtyStr(a)}${unitSuffix(a)}</td>
-          <td class="r num muted">${bal ? `<span class="dim">—</span><small>${ccy}</small>` : money(conv(+a.cost || 0, ccy), { max: 8 }) + (orig ? `<small>${money(+a.cost || 0, { ccy, max: 8 })}</small>` : '')}</td>
-          <td class="r num strong">${bal ? '<span class="dim">—</span>' : money(conv(+a.price || 0, ccy), { max: 8 }) + (orig ? `<small>${money(+a.price || 0, { ccy, max: 8 })}</small>` : '')}</td>
-          <td class="r num strong ${v < 0 ? 'down' : ''}">${money(v, { max: 8 })}${orig ? `<small>${money(aVal(a), { ccy, max: 8 })}</small>` : ''}</td>
-          <td class="r num ${upDown(day)}">${dayCell(day, dayPct)}${resetDayBtn(a, day)}</td>
-          <td class="r num ${bal ? 'dim' : upDown(pnl)}">${bal ? t('noPnl') : `${money(pnl, { sign: true })}<small class="${upDown(pnl)}">${pct(c ? (pnl / Math.abs(c)) * 100 : 0)}</small>`}</td>
-          <td><div class="srccell">${srcCell(a)}</div></td>
-          <td class="c">${H.batch ? '' : `<div class="ops icon-ops">${histBtn('asset', a.id)}${quickBtn(a, true)}<button class="op edit" data-action="edit-asset" data-id="${a.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}" title="${t('del')}">${ic('trash')}</button></div>`}</td>
-        </tr>`;
-      }).join('');
+      rows.forEach(r => { sumV += r.v; sumDay += r.day; if (!isBalance(r.a)) { sumC += aCostD(r.a); sumHV += r.v; } });
       const sp = sumHV - sumC;
-      const allSel = rows.length && rows.every(r => H.sel.has(r.a.id));
-      body = `<div class="card glass table-card"><div class="table-wrap"><table class="tbl hold-tbl">
-        <thead><tr>
-          ${H.batch ? `<th class="ckc"><label class="ck"><input type="checkbox" data-sel-all="hold" ${allSel ? 'checked' : ''}><i></i></label></th>` : ''}
-          <th>${t('colName')}</th><th>${t('colClass')}</th><th>${whFilterHTML(true)}</th><th class="r">${t('colQty')}</th><th class="r">${t('colCost')}</th><th class="r">${t('colPrice')}</th>
-          ${sortHead('val', t('colValue'))}${sortHead('day', t('colDay'))}${sortHead('pnl', t('colPnl'))}<th>${srcFilterHTML(true)}</th><th class="c">${t('colOps')}</th></tr></thead>
-        <tbody>${tr}</tbody>
-        <tfoot><tr>${H.batch ? '<td></td>' : ''}<td colspan="6">${t('total')} · ${t('nAssets', { n: rows.length })}</td><td class="r num">${money(sumV)}</td><td class="r num ${upDown(sumDay)}">${money(sumDay, { sign: true })}</td><td class="r num ${upDown(sp)}">${money(sp, { sign: true })}<small class="${upDown(sp)}">${pct(sumC ? (sp / Math.abs(sumC)) * 100 : 0)}</small></td><td colspan="2"></td></tr></tfoot>
-      </table></div></div>`;
+      body = tableHTML('hold', holdCols(), rows, {
+        cls: 'hold-tbl', kind: 'hold', batch: H.batch, sel: H.sel, id: r => r.a.id,
+        footLabel: `${t('total')} · ${t('nAssets', { n: rows.length })}`,
+        foot: { val: money(sumV), day: `<span class="${upDown(sumDay)}">${money(sumDay, { sign: true })}</span>`, pnl: `<span class="${upDown(sp)}">${money(sp, { sign: true })}</span><small class="${upDown(sp)}">${pct(sumC ? (sp / Math.abs(sumC)) * 100 : 0)}</small>` }
+      });
     }
     $('#hold-body').innerHTML = body;
   }
@@ -2212,6 +2285,7 @@
         <label class="search">${ic('search')}<input data-input="subQ" value="${esc(U.q)}" placeholder="${t('subSearchPh')}" autocomplete="off"></label>
         <label class="mini-select">${ic('sort')}<select data-change="subSort">${sorts.map(v => `<option value="${v}" ${U.sort === v ? 'selected' : ''}>${t('subSort_' + v)}</option>`).join('')}</select></label>
         <div class="seg" title="${t('subPmodeTip')}"><button class="${U.pmode !== 'month' ? 'on' : ''}" data-action="sub-pmode" data-v="cycle">${t('subPmCycle')}</button><button class="${U.pmode === 'month' ? 'on' : ''}" data-action="sub-pmode" data-v="month">${t('subPmMonth')}</button></div>
+        ${colBtnHTML('sub')}
       </div>
       <div class="chips mb">${chips}</div>
       <div id="batch-bar"></div>
@@ -2277,6 +2351,26 @@
     const up = s.nextPrice != null && s.nextPrice !== '' ? `<span class="np-b" title="${t('subNextTip')}">${ic('trend')}${t('subNext')} ${money(+s.nextPrice, { ccy: s.ccy, max: 2 })}</span>` : '';
     return inline ? `<span class="pm">${main}</span>${up}` : `${main}${small ? `<small>${small}</small>` : ''}${up}`;
   }
+  /** 订阅明细的列（h：行内用到的小工具；列设置弹窗里只用到名字时可不传） */
+  function subCols(h) {
+    const U = UI.sub; h = h || {};
+    const sortTh = (k, label) => ({ thCls: `r sortable ${U.sort === k + 'Desc' || U.sort === k + 'Asc' ? 'on' : ''}`, thAttr: `data-action="sub-sort-head" data-v="${k}"`, th: `${label}<span class="arr">${U.sort === k + 'Asc' ? '↑' : '↓'}</span>` });
+    return [
+      { k: 'name', label: t('subColName'), lock: true, th: t('subColName'), td: x => `<div class="sub-name">${subIconHTML(x.s)}<div><div class="nmcell"><b>${esc(x.s.name)}</b>${x.s.locked ? ic('lock', 'lk') : ''}${h.trial(x.s)}</div>${x.s.note ? `<small>${esc(x.s.note)}</small>` : ''}</div></div>` },
+      { k: 'alias', label: t('subColAlias'), th: t('subColAlias'), tdCls: 'muted alias-cell', td: x => (x.s.alias ? esc(x.s.alias) : '<span class="dim">—</span>') },
+      { k: 'account', label: t('subColAccount'), th: t('subColAccount'), thCls: 'c', tdCls: 'c', td: x => h.infoBtn(x.s, 'account') },
+      { k: 'site', label: t('subColSite'), th: t('subColSite'), thCls: 'c', tdCls: 'c', td: x => h.infoBtn(x.s, 'site') },
+      { k: 'cat', label: t('subColCat'), th: t('subColCat'), td: x => subCatTag(x.s.cat) },
+      { k: 'cycle', label: t('subColCycle'), th: t('subColCycle'), thCls: 'c', tdCls: 'c', td: x => `<span class="cyc-b">${esc(cycleLabel(x.s))}</span>` },
+      Object.assign({ k: 'price', label: t('subColPrice'), tdCls: 'r num strong', td: x => subPriceCell(x) }, sortTh('price', U.pmode === 'month' ? t('subColPriceM') : t('subColPrice'))),
+      { k: 'pay', label: t('subColPay'), th: t('subColPay'), tdCls: 'muted', td: x => h.payTxt(x.s) },
+      { k: 'start', label: t('subColStart'), th: t('subColStart'), tdCls: 'num', td: x => `${x.s.start || '—'}${x.s.cycle === 'once' ? `<small>${t('subBuyDate')}</small>` : x.s.trialDays > 0 ? `<small>${t('subBillFrom', { d: billStart(x.s) })}</small>` : ''}` },
+      Object.assign({ k: 'expire', label: t('subColExpire'), tdCls: 'num exp-cell', td: x => expireHTML(x.s) }, sortTh('expire', t('subColExpire'))),
+      { k: 'remind', label: t('subColRemind'), th: t('subColRemind'), thCls: 'c', tdCls: 'c', td: x => (+x.s.remind ? `<span class="rm-b">${ic('clock')}${t('subRemindN', { n: x.s.remind })}</span>` : '<span class="dim">—</span>') },
+      Object.assign({ k: 'total', label: t('subColTotal'), tdCls: 'r num strong', td: x => `${money(x.total)}<small>${t('subPayN', { n: subPays(x.s).length })}${(x.s.prices && x.s.prices.length > 1) || (x.s.adj && Object.keys(x.s.adj).length) ? ` · <span class="adj-mk">${t('subBillAdjMk')}</span>` : ''}</small>` }, sortTh('total', t('subColTotal'))),
+      { k: 'ops', label: t('colOps'), fixed: true, th: t('colOps'), thCls: 'c', tdCls: 'c', td: x => (U.batch ? '' : h.ops(x.s)) }
+    ];
+  }
   function renderSubBody() {
     const U = UI.sub, rows = subList();
     renderBatchBar('sub', rows.map(r => r.s.id));
@@ -2303,34 +2397,13 @@
         ${U.batch ? '' : `<div class="hc-ops">${histBtn('sub', s.id)}<button class="op bills" data-action="sub-bills" data-id="${s.id}">${ic('receipt')}${t('subBillsS')}</button><button class="op upd" data-action="sub-price" data-id="${s.id}">${ic('trend')}${t('subPriceUpS')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}">${ic('trash')}${t('del')}</button></div>`}
       </div>`; }).join('')}</div>`;
     } else {
-      const head = (k, label) => { const on = U.sort === k + 'Desc' || U.sort === k + 'Asc'; return `<th class="r sortable ${on ? 'on' : ''}" data-action="sub-sort-head" data-v="${k}">${label}<span class="arr">${U.sort === k + 'Asc' ? '↑' : '↓'}</span></th>`; };
-      const allSel = rows.every(r => U.sel.has(r.s.id));
       let sumM = 0, sumT = 0;
-      const tr = rows.map(x => {
-        const s = x.s; sumM += s.cycle === 'once' ? 0 : x.pm; sumT += x.total;
-        return `<tr class="${U.sel.has(s.id) ? 'sel' : ''} st-${subState(s)}">
-          ${U.batch ? `<td class="ckc"><label class="ck"><input type="checkbox" data-sel="sub" value="${s.id}" ${U.sel.has(s.id) ? 'checked' : ''}><i></i></label></td>` : ''}
-          <td><div class="sub-name">${subIconHTML(s)}<div><div class="nmcell"><b>${esc(s.name)}</b>${s.locked ? ic('lock', 'lk') : ''}${trial(s)}</div>${s.note ? `<small>${esc(s.note)}</small>` : ''}</div></div></td>
-          <td class="muted alias-cell">${s.alias ? esc(s.alias) : '<span class="dim">—</span>'}</td>
-          <td class="c">${infoBtn(s, 'account')}</td>
-          <td class="c">${infoBtn(s, 'site')}</td>
-          <td>${subCatTag(s.cat)}</td>
-          <td class="c"><span class="cyc-b">${esc(cycleLabel(s))}</span></td>
-          <td class="r num strong">${subPriceCell(x)}</td>
-          <td class="muted">${payTxt(s)}</td>
-          <td class="num">${s.start || '—'}${s.cycle === 'once' ? `<small>${t('subBuyDate')}</small>` : s.trialDays > 0 ? `<small>${t('subBillFrom', { d: billStart(s) })}</small>` : ''}</td>
-          <td class="num exp-cell">${expireHTML(s)}</td>
-          <td class="c">${+s.remind ? `<span class="rm-b">${ic('clock')}${t('subRemindN', { n: s.remind })}</span>` : '<span class="dim">—</span>'}</td>
-          <td class="r num strong">${money(x.total)}<small>${t('subPayN', { n: subPays(s).length })}${(s.prices && s.prices.length > 1) || (s.adj && Object.keys(s.adj).length) ? ` · <span class="adj-mk">${t('subBillAdjMk')}</span>` : ''}</small></td>
-          <td class="c">${U.batch ? '' : ops(s)}</td></tr>`;
-      }).join('');
-      body = `<div class="card glass table-card"><div class="table-wrap"><table class="tbl sub-tbl">
-        <thead><tr>${U.batch ? `<th class="ckc"><label class="ck"><input type="checkbox" data-sel-all="sub" ${allSel ? 'checked' : ''}><i></i></label></th>` : ''}
-          <th>${t('subColName')}</th><th>${t('subColAlias')}</th><th class="c">${t('subColAccount')}</th><th class="c">${t('subColSite')}</th><th>${t('subColCat')}</th><th class="c">${t('subColCycle')}</th>${head('price', U.pmode === 'month' ? t('subColPriceM') : t('subColPrice'))}
-          <th>${t('subColPay')}</th><th>${t('subColStart')}</th>${head('expire', t('subColExpire'))}<th class="c">${t('subColRemind')}</th>${head('total', t('subColTotal'))}<th class="c">${t('colOps')}</th></tr></thead>
-        <tbody>${tr}</tbody>
-        <tfoot><tr>${U.batch ? '<td></td>' : ''}<td colspan="6">${t('total')} · ${t('subNSubs', { n: rows.length })}</td><td class="r num">${money(sumM)}<small>${t('subPerMonthSum')}</small></td><td colspan="4"></td><td class="r num">${money(sumT)}</td><td></td></tr></tfoot>
-      </table></div></div>`;
+      rows.forEach(x => { sumM += x.s.cycle === 'once' ? 0 : x.pm; sumT += x.total; });
+      body = tableHTML('sub', subCols({ ops, payTxt, trial, infoBtn }), rows, {
+        cls: 'sub-tbl', kind: 'sub', batch: U.batch, sel: U.sel, id: x => x.s.id, rowCls: x => `st-${subState(x.s)}`,
+        footLabel: `${t('total')} · ${t('subNSubs', { n: rows.length })}`,
+        foot: { price: `${money(sumM)}<small>${t('subPerMonthSum')}</small>`, total: money(sumT) }
+      });
     }
     $('#sub-body').innerHTML = body;
   }
@@ -2460,7 +2533,8 @@
   /* ---- 新增 / 编辑订阅 ---- */
   function subCatOptions(sel) {
     const list = subCats();
-    return `<option value="" ${!sel ? 'selected' : ''}>${t('subCatNone')}</option>` + list.map(c => `<option value="${esc(c)}" ${sel === c ? 'selected' : ''}>${esc(subCatName(c))}</option>`).join('') + `<option value="__custom">${t('subCatCustom')}…</option>`;
+    return `<option value="" ${!sel ? 'selected' : ''}>${t('subCatNone')}</option>` + list.map(c => `<option value="${esc(c)}" ${sel === c ? 'selected' : ''}>${esc(subCatName(c))}</option>`).join('') + `<option value="__custom">${t('subCatCustom')}…</option>` +
+      (list.some(c => !SUB_CATS.includes(c)) ? `<option value="__manage">${t('subCatManage')}…</option>` : '');
   }
   function openSubModal(id) {
     const ex = id ? findSub(id) : null;
@@ -2482,7 +2556,8 @@
       </div>
       <div class="row2">
         <div class="field"><label>${t('subColCat')} <span class="dim">· ${t('codeOpt')}</span></label><select class="input" id="sf-cat">${subCatOptions(st.cat)}</select>
-          <input class="input" id="sf-cat-c" maxlength="20" placeholder="${t('subCatCustomPh')}" style="display:none;margin-top:8px"></div>
+          <input class="input" id="sf-cat-c" maxlength="20" placeholder="${t('subCatCustomPh')}" style="display:none;margin-top:8px">
+          <div class="cat-mgr" id="sf-cat-mgr" style="display:none"></div></div>
         <div class="field"><label>${t('subPrice')}</label><div class="price-row"><input class="input num" id="sf-price" inputmode="decimal" value="${st.price !== '' ? esc(trim8(st.price)) : ''}" placeholder="0.00"><select class="input" id="sf-ccy">${ccyOpts(st.ccy)}</select></div>
           <input class="input" id="sf-ccy-o" maxlength="5" placeholder="${t('ccyOtherPh')}" style="display:none;margin-top:8px;text-transform:uppercase"><div class="hint" id="sf-ccy-h"></div></div>
       </div>
@@ -2549,7 +2624,38 @@
           preview();
         });
         $('#sf-remind', m).addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; st.remind = +b.dataset.v; $$('#sf-remind button', m).forEach(x => x.classList.toggle('on', x === b)); });
-        $('#sf-cat', m).addEventListener('change', e => { const c = e.target.value === '__custom'; $('#sf-cat-c', m).style.display = c ? '' : 'none'; if (c) $('#sf-cat-c', m).focus(); });
+        // 自定义分类管理：改名 / 删除（删除后用到它的订阅变成未分类）
+        let catPrev = st.cat || '';
+        const drawMgr = () => {
+          const customs = subCats().filter(c => !SUB_CATS.includes(c)), box = $('#sf-cat-mgr', m);
+          box.innerHTML = `<div class="cm-h"><b>${t('subCatManage')}</b><button type="button" class="link" data-cm-close>${t('close')}</button></div>` + (customs.length ? customs.map(c => {
+            const n = DB.subs.filter(x => x.cat === c).length;
+            return `<div class="cm-row" data-c="${esc(c)}"><i class="cdot" style="background:${subCatColor(c)}"></i><input class="input" value="${esc(c)}" maxlength="20" data-cm-name><span class="dim">${t('subNSubs', { n })}</span><button type="button" class="icon-btn sm" data-cm-del title="${t('del')}">${ic('trash')}</button></div>`;
+          }).join('') : `<p class="dim">${t('subCatNoCustom')}</p>`) + `<p class="hint">${t('subCatManageHint')}</p>`;
+        };
+        const refreshCats = () => { const sel = $('#sf-cat', m), cur = sel.value; sel.innerHTML = subCatOptions(subCats().includes(catPrev) || !catPrev ? catPrev : ''); if (cur && cur !== '__manage' && cur !== '__custom') sel.value = subCats().includes(cur) ? cur : ''; };
+        const renameCat = (from, to) => {
+          to = to.trim(); if (!to || to === from) return;
+          DB.subs.filter(x => x.cat === from).forEach(x => { logOp('sub', x, 'edit', [['cat', from, to]]); x.cat = to; });
+          if (catPrev === from) catPrev = to;
+          commit(); refreshCats(); drawMgr(); toast(t('saved'), 'ok');
+        };
+        $('#sf-cat', m).addEventListener('change', e => {
+          const v = e.target.value;
+          if (v === '__manage') { e.target.value = catPrev; drawMgr(); $('#sf-cat-mgr', m).style.display = ''; return; }
+          if (v !== '__custom') catPrev = v;
+          const c = v === '__custom'; $('#sf-cat-c', m).style.display = c ? '' : 'none'; if (c) $('#sf-cat-c', m).focus();
+        });
+        $('#sf-cat-mgr', m).addEventListener('click', async e => {
+          if (e.target.closest('[data-cm-close]')) { $('#sf-cat-mgr', m).style.display = 'none'; return; }
+          const del = e.target.closest('[data-cm-del]'); if (!del) return;
+          const c = del.closest('.cm-row').dataset.c, n = DB.subs.filter(x => x.cat === c).length;
+          if (!(await confirmDialog({ title: t('subCatDelT'), msg: t('subCatDelM', { c: esc(c), n }), ok: t('del') }))) return;
+          DB.subs.filter(x => x.cat === c).forEach(x => { logOp('sub', x, 'edit', [['cat', c, '']]); x.cat = ''; });
+          if (catPrev === c) catPrev = '';
+          commit(); refreshCats(); drawMgr(); toast(t('subCatDeleted', { c }), 'ok');
+        });
+        $('#sf-cat-mgr', m).addEventListener('change', e => { const inp = e.target.closest('[data-cm-name]'); if (inp) renameCat(inp.closest('.cm-row').dataset.c, inp.value); });
         ['#sf-price', '#sf-cn', '#sf-start', '#sf-trial'].forEach(q => $(q, m).addEventListener('input', preview));
         ['#sf-cu', '#sf-ccy'].forEach(q => $(q, m).addEventListener('change', preview));
         $('#sf-ccy-o', m).addEventListener('input', preview);
@@ -4051,6 +4157,7 @@
     },
     'add-asset'() { openAssetModal(); },
     'add-sub'() { openSubModal(); },
+    cols(el) { openColsModal(el.dataset.v); },
     async 'edit-sub'(el) {
       const s = findSub(el.dataset.id); if (!s) return;
       if (!(await requireUnlock(s.locked ? t('verifyLockedMsg') : t('verifySubMsg'), s.locked))) return;
@@ -4319,7 +4426,9 @@
   };
 
   function bindEvents() {
+    document.addEventListener('pointerdown', e => { const h = e.target.closest('.col-rs'); if (h) startColResize(e, h); }, true);
     document.addEventListener('click', e => {
+      if (e.target.closest('.col-rs') || Date.now() - (UI.colDragAt || 0) < 250) { if (e.target.closest('thead')) { e.preventDefault(); return; } }   // 拖动列宽时不触发表头排序
       if (e.target.closest('[data-modal-close]')) { closeModal(); return; }
       const el = e.target.closest('[data-action]');
       if (!el || el.disabled) return;
