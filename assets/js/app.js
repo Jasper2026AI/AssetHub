@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -112,6 +112,8 @@
     'chev-l': '<path d="M15 6l-6 6 6 6"/>',
     'chev-d': '<path d="M6 9l6 6 6-6"/>',
     'chev-u': '<path d="M6 15l6-6 6 6"/>',
+    archive: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M10 13h4"/>',
+    unarchive: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M12 17v-5M9.5 14.5 12 12l2.5 2.5"/>',
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
     wallet: '<rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18M16 15h2"/><path d="M6 6l9-3 1.5 3"/>',
     in: '<path d="M12 4v12M6 10l6 6 6-6"/><path d="M5 20h14"/>',
@@ -704,7 +706,7 @@
     kEnd: 0,                                            // 日K 视窗末端偏移（0 = 最新）
     hold: { q: '', cls: 'all', src: 'all', wh: '__all', sort: 'valDesc', batch: false, sel: new Set() },
     rankDay: '',
-    sub: { period: 'month', q: '', cat: 'all', sort: 'expireAsc', pmode: 'cycle', batch: false, sel: new Set() },                                        // 资产日盈亏查看的历史日期（空 = 今天）
+    sub: { period: 'month', q: '', cat: 'all', sort: 'expireAsc', pmode: 'cycle', batch: false, sel: new Set(), view: 'active' },                                        // 资产日盈亏查看的历史日期（空 = 今天）
     led: { mode: 'month', date: '', type: 'all', cat: 'all', acct: 'all', q: '', sort: 'dateDesc', batch: false, sel: new Set() }
   };
 
@@ -2015,6 +2017,8 @@
       <span class="bb-sp"></span>
       ${kind !== 'tx' ? `<button class="btn btn-soft sm" data-action="batch-lock" data-kind="${kind}" ${n ? '' : 'disabled'}>${ic('lock')}${t('batchLock')}</button>
       <button class="btn btn-glass sm" data-action="batch-unlock" data-kind="${kind}" ${n ? '' : 'disabled'}>${ic('unlock')}${t('batchUnlock')}</button>` : ''}
+      ${kind === 'sub' ? (UI.sub.view === 'archived' ? `<button class="btn btn-glass sm" data-action="batch-unarch" ${n ? '' : 'disabled'}>${ic('unarchive')}${t('subUnarchive')}</button>`
+        : `<button class="btn btn-glass sm" data-action="batch-arch" ${n ? '' : 'disabled'}>${ic('archive')}${t('subArchive')}</button>`) : ''}
       <button class="btn btn-danger sm" data-action="batch-del" data-kind="${kind}" ${n ? '' : 'disabled'}>${ic('trash')}${t('batchDel')}</button>
     </div>`;
   }
@@ -2369,9 +2373,20 @@
     return { keys, labels: keys.map(label), tips: keys.map(tipOf), buckets, totals: buckets.map(o => Object.values(o).reduce((a, b) => a + b, 0)),
       stacks: buckets.map(o => Object.keys(o).sort((a, b) => o[b] - o[a]).map(c => ({ key: c, color: subCatColor(c), v: o[c] }))), mark: i => keys[i] === nowK };
   }
+  /** 归档：已过期的订阅可以归档。归档后不在订阅列表里、不再提醒；以前的扣费仍计入费用统计。续费或把到期日改到以后会自动取消归档 */
+  const subsInView = () => DB.subs.filter(s => (UI.sub.view === 'archived') === !!s.archived);
+  const canArchive = s => !s.archived && subState(s) === 'expired';
+  function setArchived(list, on) {
+    const hit = list.filter(s => (on ? canArchive(s) : !!s.archived));
+    hit.forEach(s => { if (on) s.archived = todayKey(); else delete s.archived; s.updatedAt = Date.now(); logOp('sub', s, on ? 'archive' : 'unarchive'); });
+    if (!hit.length) { toast(t(on ? 'subArchNone' : 'subUnarchNone'), 'err'); return 0; }
+    UI.sub.sel.clear(); commit(); renderSubs(); checkSubReminders();
+    toast(t(on ? 'subArchivedN' : 'subUnarchivedN', { n: hit.length }) + (list.length > hit.length ? ' · ' + t('subArchSkipN', { n: list.length - hit.length }) : ''), 'ok');
+    return hit.length;
+  }
   function subList() {
     const U = UI.sub, q = U.q.trim().toLowerCase();
-    let list = DB.subs.map(s => ({ s, total: subTotal(s), pm: conv(perMonth(s), s.ccy), cyc: conv(+s.price || 0, s.ccy) }));
+    let list = subsInView().map(s => ({ s, total: subTotal(s), pm: conv(perMonth(s), s.ccy), cyc: conv(+s.price || 0, s.ccy) }));
     list = list.filter(x => U.cat === 'all' || (x.s.cat || '') === U.cat);
     if (q) list = list.filter(x => [x.s.name, x.s.alias, subCatName(x.s.cat), x.s.note, x.s.payId ? acctName(x.s.payId) : ''].some(v => String(v || '').toLowerCase().includes(q)));
     const pv = x => (U.pmode === 'month' ? (x.s.cycle === 'once' ? 0 : x.pm) : x.cyc), ex = x => x.s.expire || '9999-12-31';
@@ -2397,7 +2412,9 @@
       return kpiCard({ cls: `sub-kpi ${U.period === p ? 'sel' : ''}`, attr: `data-action="sub-period" data-v="${p}" role="button" tabindex="0"`, icon: subPeriodIcon[p],
         label: t('subK_' + p), val: moneyHTML(v), sub, spark: sparkSVG(subBarData(p, pays).totals, U.period === p ? '#FF9000' : '#8E8E93') });
     };
-    const cnt = { all: DB.subs.length }; DB.subs.forEach(s => { const c = s.cat || ''; cnt[c] = (cnt[c] || 0) + 1; });
+    const inView = subsInView(), nArch = DB.subs.filter(s => s.archived).length, nExp = DB.subs.filter(canArchive).length;
+    if (U.view === 'archived' && !nArch) U.view = 'active';
+    const cnt = { all: subsInView().length }; subsInView().forEach(s => { const c = s.cat || ''; cnt[c] = (cnt[c] || 0) + 1; });
     const catsShown = subCats().filter(c => cnt[c]).concat(cnt[''] ? [''] : []);
     if (U.cat !== 'all' && !cnt[U.cat]) U.cat = 'all';
     const chips = [`<button class="chip ${U.cat === 'all' ? 'on' : ''}" data-action="sub-cat" data-v="all">${t('all')}<em>${cnt.all}</em></button>`].concat(catsShown.map(c =>
@@ -2432,7 +2449,10 @@
         <div class="seg" title="${t('subPmodeTip')}"><button class="${U.pmode !== 'month' ? 'on' : ''}" data-action="sub-pmode" data-v="cycle">${t('subPmCycle')}</button><button class="${U.pmode === 'month' ? 'on' : ''}" data-action="sub-pmode" data-v="month">${t('subPmMonth')}</button></div>
         ${colBtnHTML('sub')}
       </div>
-      <div class="chips mb">${chips}<button class="chip chip-tool" data-action="sub-cats">${ic('sliders')}${t('subCatManageS')}</button></div>
+      <div class="chips mb">${chips}<button class="chip chip-tool" data-action="sub-cats">${ic('sliders')}${t('subCatManageS')}</button>
+        ${U.view !== 'archived' && nExp ? `<button class="chip chip-tool" data-action="sub-arch-all">${ic('archive')}${t('subArchAll', { n: nExp })}</button>` : ''}
+        ${nArch || U.view === 'archived' ? `<button class="chip chip-arch ${U.view === 'archived' ? 'on' : ''}" data-action="sub-view">${ic('archive')}${t('subArchived')}<em>${nArch}</em></button>` : ''}</div>
+      ${U.view === 'archived' ? `<div class="arch-bar glass">${ic('archive')}<span>${t('subArchHint')}</span><button class="btn btn-glass sm" data-action="sub-view">${t('subArchBack')}</button></div>` : ''}
       <div id="batch-bar"></div>
       <div id="sub-body"></div>`;
     drawSubCharts(pays);
@@ -2518,17 +2538,20 @@
   }
   function renderSubBody() {
     const U = UI.sub, rows = subList();
+    const archBtn = (s, txt) => (s.archived ? `<button class="op arch" data-action="sub-unarchive" data-id="${s.id}" title="${t('subUnarchive')}">${ic('unarchive')}${txt ? t('subUnarchive') : ''}</button>`
+      : canArchive(s) ? `<button class="op arch" data-action="sub-archive" data-id="${s.id}" title="${t('subArchive')}">${ic('archive')}${txt ? t('subArchive') : ''}</button>` : '');
     renderBatchBar('sub', rows.map(r => r.s.id));
-    const ops = s => `<div class="ops icon-ops">${histBtn('sub', s.id)}<button class="op bills" data-action="sub-bills" data-id="${s.id}" title="${t('subBillsT')}">${ic('receipt')}</button><button class="op upd" data-action="sub-price" data-id="${s.id}" title="${t('subPriceUp')}">${ic('trend')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}" title="${t('del')}">${ic('trash')}</button></div>`;
+    const ops = s => `<div class="ops icon-ops">${histBtn('sub', s.id)}<button class="op bills" data-action="sub-bills" data-id="${s.id}" title="${t('subBillsT')}">${ic('receipt')}</button><button class="op upd" data-action="sub-price" data-id="${s.id}" title="${t('subPriceUp')}">${ic('trend')}</button>${archBtn(s)}<button class="op edit" data-action="edit-sub" data-id="${s.id}" title="${t('edit')}">${ic('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}" title="${t('del')}">${ic('trash')}</button></div>`;
     const payTxt = s => (s.payId ? `${esc(acctName(s.payId))}${acctWh(s.payId) ? `<small class="wh-sm">${ic('db')}${esc(acctWh(s.payId))}</small>` : ''}` : '<span class="dim">—</span>');
     const trial = s => (+s.trialDays > 0 && s.cycle !== 'once' ? `<span class="trial-b ${subState(s) === 'trial' ? 'on' : ''}">${t('subTrialN', { n: s.trialDays })}</span>` : '');
     // 账号 / 网站：只显示图标，点开才显示内容
     const infoBtn = (s, k) => (s[k] ? `<button class="info-ic" data-action="sub-info" data-k="${k}" data-id="${s.id}" title="${t(k === 'account' ? 'subAccountShow' : 'subSiteShow')}">${ic(k === 'account' ? 'user' : 'globe')}</button>` : '<span class="dim">—</span>');
     let body;
-    if (!DB.subs.length) body = `<div class="card glass"><div class="empty"><div class="em">🔁</div><h4>${t('subEmpty')}</h4><p>${t('subEmptySub')}</p><div class="btns"><button class="btn btn-accent sm" data-action="add-sub">${ic('plus')}${t('subAdd')}</button></div></div></div>`;
+    if (!subsInView().length && DB.subs.length) body = `<div class="card glass"><div class="empty"><div class="em">🗄️</div><h4>${t('subArchEmpty')}</h4></div></div>`;
+    else if (!DB.subs.length) body = `<div class="card glass"><div class="empty"><div class="em">🔁</div><h4>${t('subEmpty')}</h4><p>${t('subEmptySub')}</p><div class="btns"><button class="btn btn-accent sm" data-action="add-sub">${ic('plus')}${t('subAdd')}</button></div></div></div>`;
     else if (!rows.length) body = `<div class="card glass">${emptyState('nomatch')}</div>`;
     else if (isMobile() || window.innerWidth < 760) {   // 手机布局或窄屏：卡片列表
-      body = `<div class="hlist">${rows.map(x => { const s = x.s; return `<div class="hcard glass sub-card ${U.sel.has(s.id) ? 'sel' : ''}">
+      body = `<div class="hlist">${rows.map(x => { const s = x.s; return `<div class="hcard glass sub-card ${U.sel.has(s.id) ? 'sel' : ''} ${s.archived ? 'archived' : ''}">
         <div class="hc-top">
           ${U.batch ? `<label class="ck"><input type="checkbox" data-sel="sub" value="${s.id}" ${U.sel.has(s.id) ? 'checked' : ''}><i></i></label>` : ''}
           ${subIconHTML(s)}
@@ -2539,13 +2562,13 @@
           <div><div class="l">${t('subColPay')}</div><div class="x">${s.payId ? esc(acctName(s.payId)) : '—'}</div></div>
           <div><div class="l">${t('subColRemind')}</div><div class="x">${+s.remind ? t('subRemindN', { n: s.remind }) : '—'}</div></div>
         </div>
-        ${U.batch ? '' : `<div class="hc-ops">${histBtn('sub', s.id)}<button class="op bills" data-action="sub-bills" data-id="${s.id}">${ic('receipt')}${t('subBillsS')}</button><button class="op upd" data-action="sub-price" data-id="${s.id}">${ic('trend')}${t('subPriceUpS')}</button><button class="op edit" data-action="edit-sub" data-id="${s.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}">${ic('trash')}${t('del')}</button></div>`}
+        ${U.batch ? '' : `<div class="hc-ops">${histBtn('sub', s.id)}<button class="op bills" data-action="sub-bills" data-id="${s.id}">${ic('receipt')}${t('subBillsS')}</button><button class="op upd" data-action="sub-price" data-id="${s.id}">${ic('trend')}${t('subPriceUpS')}</button>${archBtn(s, true)}<button class="op edit" data-action="edit-sub" data-id="${s.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-sub" data-id="${s.id}">${ic('trash')}${t('del')}</button></div>`}
       </div>`; }).join('')}</div>`;
     } else {
       let sumM = 0, sumT = 0;
       rows.forEach(x => { sumM += x.s.cycle === 'once' ? 0 : x.pm; sumT += x.total; });
       body = tableHTML('sub', subCols({ ops, payTxt, trial, infoBtn }), rows, {
-        cls: 'sub-tbl', kind: 'sub', batch: U.batch, sel: U.sel, id: x => x.s.id, rowCls: x => `st-${subState(x.s)}`,
+        cls: 'sub-tbl', kind: 'sub', batch: U.batch, sel: U.sel, id: x => x.s.id, rowCls: x => `st-${subState(x.s)}${x.s.archived ? ' archived' : ''}`,
         footLabel: `${t('total')} · ${t('subNSubs', { n: rows.length })}`,
         foot: { price: `${money(sumM)}<small>${t('subPerMonthSum')}</small>`, total: money(sumT) }
       });
@@ -2820,7 +2843,9 @@
             }
             const d = diffOf(ex, rec, SUB_FIELDS);
             Object.assign(ex, rec);
+            const unA = ex.archived && subState(ex) !== 'expired';
             if (d.length) logOp('sub', ex, 'edit', d.map(x => (x[0] === 'icon' ? ['icon', x[1] ? 1 : '', x[2] ? 1 : ''] : x)));
+            if (unA) { delete ex.archived; logOp('sub', ex, 'unarchive'); setTimeout(() => toast(t('subAutoUnarch'), 'ok'), 1200); }   // 到期日改到以后：自动取消归档
           } else {
             const s = Object.assign({ id: uid(), createdAt: Date.now(), nextPrice: null, locked: false }, rec);
             DB.subs.push(s);
@@ -2880,9 +2905,9 @@
   /* ---- 记一笔：支出关联订阅（续期 / 新建） ---- */
   function subOptions(sel) {
     const groups = {};
-    DB.subs.forEach(s => { (groups[s.cat || ''] = groups[s.cat || ''] || []).push(s); });
+    DB.subs.forEach(s => { const g = s.archived ? '\u0000arch' : s.cat || ''; (groups[g] = groups[g] || []).push(s); });
     return `<option value="">${t('subLinkNone')}</option><option value="__new" ${sel === '__new' ? 'selected' : ''}>${t('subLinkNew')}</option>` +
-      Object.keys(groups).sort((a, b) => (!a ? 1 : !b ? -1 : 0)).map(c => `<optgroup label="${esc(subCatName(c))}">${groups[c].map(s =>
+      Object.keys(groups).sort((a, b) => (a === '\u0000arch' ? 1 : b === '\u0000arch' ? -1 : !a ? 1 : !b ? -1 : 0)).map(c => `<optgroup label="${esc(c === '\u0000arch' ? t('subArchived') : subCatName(c))}">${groups[c].map(s =>
         `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(s.name)} · ${esc(money(+(s.nextPrice != null && s.nextPrice !== '' ? s.nextPrice : s.price) || 0, { ccy: s.ccy, max: 2, raw: true }))}/${esc(cycleShort(s))}${s.expire ? ' · ' + s.expire : ''}</option>`).join('')}</optgroup>`).join('');
   }
   /** 续期到哪天：没到期就从原到期日往后顺延，已过期 / 新订阅从付款日起算 */
@@ -2905,7 +2930,7 @@
       tx.subMade = true;
     }
     if (!s) return null;
-    const prev = { expire: s.expire || '', price: s.price, nextPrice: s.nextPrice == null ? null : s.nextPrice };
+    const prev = { expire: s.expire || '', price: s.price, nextPrice: s.nextPrice == null ? null : s.nextPrice, archived: s.archived || '' };
     const ne = renewTo(s, sel.id === '__new' ? '' : s.expire, tx.date, sel.renew, sel.date);
     Object.assign(tx, { subId: s.id, subPrev: prev, subNew: ne, subRenew: sel.renew });
     if (sel.renew === 'custom') tx.subDate = sel.date; else delete tx.subDate;
@@ -2917,6 +2942,7 @@
       s.price = +s.nextPrice; s.nextPrice = null; d.push(['price', prev.price, s.price]);
     }
     logOp('sub', s, 'renew', d, { tx: recTitle('tx', tx) });
+    if (s.archived && subState(s) !== 'expired') { delete s.archived; logOp('sub', s, 'unarchive'); }   // 续费后自动取消归档
     return s;
   }
   function subRevert(x) {
@@ -2926,6 +2952,7 @@
     s.expire = x.subPrev.expire || '';
     if (x.subPrev.price != null) s.price = x.subPrev.price;
     s.nextPrice = x.subPrev.nextPrice == null ? null : x.subPrev.nextPrice;
+    if (x.subPrev.archived && subState(s) === 'expired') s.archived = x.subPrev.archived;
     if (s.priceHist) s.priceHist = s.priceHist.filter(h => h.tx !== x.id);
     logOp('sub', s, 'unrenew', [['expire', x.subNew || '', s.expire]], { tx: recTitle('tx', x) });
   }
@@ -2934,7 +2961,7 @@
   function checkSubReminders() {
     const box = $('#sub-remind') || (() => { const d = document.createElement('div'); d.id = 'sub-remind'; d.className = 'sub-remind'; document.body.appendChild(d); return d; })();
     const tk = todayKey(), seen = S().subSeen || {};
-    const due = (DB.subs || []).filter(s => +s.remind > 0 && s.expire && daysTo(s.expire) >= 0 && daysTo(s.expire) <= +s.remind && seen[s.id] !== tk + '|' + s.expire)
+    const due = (DB.subs || []).filter(s => !s.archived && +s.remind > 0 && s.expire && daysTo(s.expire) >= 0 && daysTo(s.expire) <= +s.remind && seen[s.id] !== tk + '|' + s.expire)
       .sort((a, b) => (a.expire < b.expire ? -1 : 1));
     box.innerHTML = due.map(s => {
       const d = daysTo(s.expire), amt = +(s.nextPrice != null && s.nextPrice !== '' ? s.nextPrice : s.price) || 0;
@@ -4308,6 +4335,16 @@
     'sub-info'(el) { const s = findSub(el.dataset.id); if (s) openSubInfo(el, s, el.dataset.k); },
     'sub-cat'(el) { UI.sub.cat = UI.sub.cat === el.dataset.v && el.classList.contains('legend-row') ? 'all' : el.dataset.v; renderSubs(); },
     'sub-pmode'(el) { UI.sub.pmode = el.dataset.v; renderSubs(); },
+    'sub-view'() { UI.sub.view = UI.sub.view === 'archived' ? 'active' : 'archived'; UI.sub.cat = 'all'; UI.sub.sel.clear(); renderSubs(); },
+    'sub-archive'(el) { const s = findSub(el.dataset.id); if (s) setArchived([s], true); },
+    'sub-unarchive'(el) { const s = findSub(el.dataset.id); if (s) setArchived([s], false); },
+    async 'sub-arch-all'() {
+      const list = DB.subs.filter(canArchive); if (!list.length) return;
+      if (!(await confirmDialog({ title: t('subArchAllT'), msg: t('subArchAllM', { n: list.length, l: list.slice(0, 8).map(s => esc(s.name)).join('、') + (list.length > 8 ? '…' : '') }), ok: t('subArchive'), danger: false }))) return;
+      setArchived(list, true);
+    },
+    'batch-arch'() { setArchived(DB.subs.filter(s => UI.sub.sel.has(s.id)), true); },
+    'batch-unarch'() { setArchived(DB.subs.filter(s => UI.sub.sel.has(s.id)), false); },
     'sub-batch'() { UI.sub.batch = !UI.sub.batch; UI.sub.sel.clear(); renderSubs(); },
     'sub-sort-head'(el) {
       const k = el.dataset.v, U = UI.sub;

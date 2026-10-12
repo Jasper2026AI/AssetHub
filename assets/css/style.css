@@ -1217,3 +1217,16 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
    以前留白加在 body 上，会随页面滚走，吸顶的顶部栏就压到状态栏时间上（iOS 16 明显，iOS 26+ 被系统模糊盖住）。
    现在顶部栏自己带状态栏高度的毛玻璃底；普通 Safari / 电脑上 safe-area-inset-top = 0，不受影响 */
 .topbar{padding-top:env(safe-area-inset-top,0px)}
+/* ===== v7.1 订阅归档 ===== */
+.chip.chip-arch{gap:6px}
+.chip.chip-arch svg{width:14px;height:14px}
+.chip.chip-tool svg{width:14px;height:14px}
+.arch-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:16px;margin-bottom:12px;font-size:13px;color:var(--text-2,rgba(255,255,255,.7));border-color:rgba(142,142,147,.3)}
+.arch-bar>svg{width:18px;height:18px;flex:none;color:#8E8E93}
+.arch-bar span{flex:1;line-height:1.5}
+.arch-bar .btn{flex:none}
+.sub-tbl tr.archived td{opacity:.62}
+.sub-tbl tr.archived td:last-child{opacity:1}
+.sub-card.archived{opacity:.75}
+.op.arch{color:#8E8E93}
+.op.arch:hover{color:#fff}
