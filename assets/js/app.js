@@ -23,6 +23,27 @@
   // 资产类别（可多选；第一个选中的为“主类别”，用于占比图，避免重复计算）
   const CLASSES = ['stock', 'crypto', 'gold', 'fund', 'cash', 'liability', 'physical', 'other'];
   const CLASS_COLOR = { stock: '#0A84FF', crypto: '#FF9000', gold: '#FFD60A', fund: '#30B0C7', cash: '#BF5AF2', liability: '#8E8E93', physical: '#AC8E68', other: '#5E5CE6' };
+  /** 资产类别列表（内置类别可改名 / 改颜色 / 排序；自定义类别 x… 还可以删除），随账本云同步：[{ k, n: 名称（空 = 默认）, c: 颜色 }] */
+  function clsList() {
+    const m = DB.meta;
+    if (!Array.isArray(m.assetCls)) m.assetCls = CLASSES.map(k => ({ k, n: '', c: '' }));
+    CLASSES.forEach(k => { if (!m.assetCls.some(x => x.k === k)) m.assetCls.push({ k, n: '', c: '' }); });
+    DB.assets.forEach(a => (Array.isArray(a.cls) ? a.cls : [a.cls]).forEach(c => { if (c && !m.assetCls.some(x => x.k === c)) m.assetCls.push({ k: c, n: '', c: '' }); }));
+    return m.assetCls;
+  }
+  const clsKeys = () => clsList().map(x => x.k);
+  const clsItem = c => (DB.meta.assetCls || []).find(y => y.k === c);
+  const clsName = c => { const x = clsItem(c); return (x && x.n) || (CLASSES.includes(c) ? t('cls_' + c) : c); };
+  const clsColor = c => { const x = clsItem(c); return x && x.c ? x.c : (CLASS_COLOR[c] || CLS_EXTRA[[...String(c)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % CLS_EXTRA.length]); };
+  const CLS_EXTRA = ['#FF375F', '#30D158', '#64D2FF', '#FF6B3D', '#66D4CF', '#FF6482', '#32ADE6'];
+  /** 仓库列表（预设 + 用到的，顺序 = 筛选 / 下拉 / 分组顺序），随账本云同步 */
+  function whList() {
+    const m = DB.meta;
+    if (!Array.isArray(m.whs)) m.whs = WAREHOUSE_PRESETS.slice();
+    DB.assets.forEach(a => { if (a.warehouse && !m.whs.includes(a.warehouse)) m.whs.push(a.warehouse); });
+    return m.whs;
+  }
+  const whOrd = w => { const i = (DB.meta.whs || []).indexOf(w); return i < 0 ? 1e9 : i; };
   const PNL_CLASSES = ['stock', 'crypto', 'gold', 'fund'];        // 总览第二、三行指标卡
   const EXP_CATS = ['food', 'daily', 'transport', 'housing', 'leisure', 'digital', 'subscription', 'medical', 'social', 'investLoss', 'otherExp'];
   const INC_CATS = ['salary', 'bonus', 'invest', 'parttime', 'gift', 'refund', 'otherInc'];
@@ -64,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '6.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '6.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -152,7 +173,7 @@
       if (c === 'realestate') a.cls = Api.isGold(a.code) ? ['gold', 'physical'] : ['physical'];
       else a.cls = CLASSES.includes(c) ? [c] : ['other'];
     }
-    a.cls = a.cls.filter(c => CLASSES.includes(c));
+    a.cls = a.cls.filter(c => CLASSES.includes(c) || /^x[a-z0-9]{6,}$/.test(c));   // x… = 自定义类别
     if (!a.cls.length) a.cls = ['other'];
     if (a.warehouse == null) a.warehouse = '';
     // v5.3：类别里含现金 / 负债的多类别资产改为“余额”填写；把原来的 数量 × 单价 折成余额，市值不变
@@ -256,7 +277,7 @@
     backupNow('pull');
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs; DB.subs = c.subs || [];
-    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
+    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, assetCls: c.meta.assetCls || DB.meta.assetCls, whs: c.meta.whs || DB.meta.whs, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
     // 每日快照：同一个 Gist 的两台设备互相合并；换了 Gist（另一个账本）就直接用云端的，不把旧账本的历史带进来
     const sameBook = S().snapsGist === S().gistId;
     const loc = DB.snaps;
@@ -787,8 +808,8 @@
   const aCostD = a => conv(aCost(a), aCcy(a));
   const netD = () => DB.assets.reduce((s, a) => s + aValD(a), 0);
   const netUSD = () => DB.assets.reduce((s, a) => s + conv(aVal(a), aCcy(a), 'USD'), 0);
-  const clsLabel = a => tagsOf(a).map(c => t('cls_' + c)).join(' · ');
-  const tagHTML = a => tagsOf(a).map(c => `<span class="tag" style="--tc:${CLASS_COLOR[c]}">${t('cls_' + c)}</span>`).join('');
+  const clsLabel = a => tagsOf(a).map(c => clsName(c)).join(' · ');
+  const tagHTML = a => tagsOf(a).map(c => `<span class="tag" style="--tc:${clsColor(c)}">${clsName(c)}</span>`).join('');
 
   /** 每日快照：记录总资产 OHLC（USD）与各资产价格，用于当月/当年盈亏和资产趋势图 */
   function recordSnap() {
@@ -1143,7 +1164,7 @@
   function classCardHTML(c, extra) {
     const icon = { stock: 'trend', crypto: 'bolt', gold: 'sparkle', fund: 'pie' }, C = colors();
     const col = v => (v > 1e-9 ? C.up : v < -1e-9 ? C.down : '#8E8E93');
-    const tot = classTotal(c), name = t('cls_' + c), ck = 'cls_' + c;
+    const tot = classTotal(c), name = clsName(c), ck = 'cls_' + c;
     const h = kdHist(ck, d => invDay(d, c)), day = h || periodPnl('day', DB.assets.filter(a => primary(a) === c));
     return `<div class="kpi glass dual ${tone(tot.pnl)} ${extra ? extra.cls : ''}" ${extra ? extra.attr : ''}>
         <div class="dual-grid">
@@ -1198,7 +1219,7 @@
   }
   const liveBadge = () => `<span class="live"><i></i>${t('live')}</span>`;
   const clsOptions = (sel, withAll) => (withAll ? `<option value="all" ${sel === 'all' ? 'selected' : ''}>${t('allCls')}</option>` : '') +
-    CLASSES.map(c => `<option value="${c}" ${sel === c ? 'selected' : ''}>${t('cls_' + c)}</option>`).join('');
+    clsKeys().map(c => `<option value="${c}" ${sel === c ? 'selected' : ''}>${clsName(c)}</option>`).join('');
 
   /* ================= 页面一：资产总览 ================= */
   function renderOverview() {
@@ -1269,14 +1290,14 @@
     let segs, rows, center;
     if (!drill) {
       // 资产总占比：按“主类别”统计；负债不进圆环，单独列出
-      const by = {}; CLASSES.forEach(c => { by[c] = 0; });
+      const by = {}; clsKeys().forEach(c => { by[c] = 0; });
       DB.assets.forEach(a => { by[primary(a)] += aValD(a); });
-      const order = CLASSES.filter(c => c !== 'liability');
+      const order = clsKeys().filter(c => c !== 'liability');
       order.sort((x, y) => (so === 'asc' ? by[x] - by[y] : by[y] - by[x]));
       order.push('liability');
-      segs = order.filter(c => c !== 'liability').map(c => ({ key: c, label: t('cls_' + c), value: Math.max(0, by[c]), color: CLASS_COLOR[c] }));
+      segs = order.filter(c => c !== 'liability').map(c => ({ key: c, label: clsName(c), value: Math.max(0, by[c]), color: clsColor(c) }));
       const pos = segs.reduce((x, y) => x + y.value, 0);
-      rows = order.map(c => ({ key: c, label: t('cls_' + c), color: CLASS_COLOR[c], v: by[c], p: c === 'liability' ? null : (pos ? (Math.max(0, by[c]) / pos) * 100 : 0), click: DB.assets.some(a => primary(a) === c) }));
+      rows = order.map(c => ({ key: c, label: clsName(c), color: clsColor(c), v: by[c], p: c === 'liability' ? null : (pos ? (Math.max(0, by[c]) / pos) * 100 : 0), click: DB.assets.some(a => primary(a) === c) }));
       center = k => {
         if (!k) return `<div class="t">${t('kpiNet')}</div><div class="v num">${money(net)}</div><div class="p">${t('nAssets', { n: DB.assets.length })}</div><div class="p dim2">${t('allocDrillTip')}</div>`;
         const sg = segs.find(x => x.key === k);
@@ -1286,14 +1307,14 @@
       // 某一类别的占比：类别内每项资产的占比（负债按绝对值画圆环）
       const list = DB.assets.filter(a => primary(a) === drill).map(a => ({ a, v: aValD(a) }));
       list.sort((x, y) => (so === 'asc' ? Math.abs(x.v) - Math.abs(y.v) : Math.abs(y.v) - Math.abs(x.v)));
-      const base = CLASS_COLOR[drill], n = list.length;
+      const base = clsColor(drill), n = list.length;
       const color = i => (n <= 1 ? base : shade(base, -0.35 + (0.9 * i) / (n - 1)));
       segs = list.map((x, i) => ({ key: x.a.id, label: x.a.name, value: Math.abs(x.v), color: color(i) }));
       const tot = list.reduce((x, y) => x + y.v, 0), absTot = segs.reduce((x, y) => x + y.value, 0);
       const allPos = DB.assets.reduce((x, a) => x + Math.max(0, aValD(a)), 0);
       rows = list.map((x, i) => ({ key: x.a.id, label: x.a.name, sub: x.a.code || '', wh: x.a.warehouse || '', color: color(i), v: x.v, p: absTot ? (Math.abs(x.v) / absTot) * 100 : 0, click: false }));
       center = k => {
-        if (!k) return `<div class="t">${t('clsAlloc', { c: t('cls_' + drill) })}</div><div class="v num">${money(tot)}</div><div class="p">${drill === 'liability' ? t('nItems', { n }) : t('ofTotal', { p: (allPos ? (Math.max(0, tot) / allPos) * 100 : 0).toFixed(2) + '%' })}</div>`;
+        if (!k) return `<div class="t">${t('clsAlloc', { c: clsName(drill) })}</div><div class="v num">${money(tot)}</div><div class="p">${drill === 'liability' ? t('nItems', { n }) : t('ofTotal', { p: (allPos ? (Math.max(0, tot) / allPos) * 100 : 0).toFixed(2) + '%' })}</div>`;
         const sg = segs.find(x => x.key === k), r = rows.find(x => x.key === k);
         return `<div class="t">${esc(sg.label)}</div><div class="v num">${money(r.v)}</div><div class="p">${r.p.toFixed(2)}%</div>`;
       };
@@ -1303,7 +1324,7 @@
         <div class="lg-val num ${r.v < 0 ? 'down' : ''}">${money(r.v)}</div>
         <div class="lg-pct num">${r.p == null ? '—' : r.p.toFixed(1) + '%'}</div>
         <div class="lg-bar"><i style="width:${r.p || 0}%;background:${r.color}"></i></div>${r.click ? `<span class="lg-go">${ic('chev-r')}</span>` : ''}</div>`).join('');
-    const head = drill ? `<div class="alloc-crumb"><button data-action="alloc-back">${t('backAlloc')}</button>${ic('chev-r')}<b style="--tc:${CLASS_COLOR[drill]}">${t('clsAlloc', { c: t('cls_' + drill) })}</b></div>` : '';
+    const head = drill ? `<div class="alloc-crumb"><button data-action="alloc-back">${t('backAlloc')}</button>${ic('chev-r')}<b style="--tc:${clsColor(drill)}">${t('clsAlloc', { c: clsName(drill) })}</b></div>` : '';
     body.innerHTML = `${head}<div class="donut-wrap ${UI.allocAnim || ''}"><div class="donut ${drill ? 'drilled' : 'drillable'}" id="donut"></div><div class="legend">${legend}</div></div>`;
     UI.allocAnim = '';
     const d = Charts.donut($('#donut'), segs, {
@@ -1331,7 +1352,7 @@
   }
   function rankPillHTML(key) {
     const c = S()[key || 'rankCls'];
-    return `${c === 'all' ? '<i class="cdot all"></i>' : `<i class="cdot" style="background:${CLASS_COLOR[c]}"></i>`}<span>${c === 'all' ? t('allCls') : t('cls_' + c)}</span>${ic('chev-d')}`;
+    return `${c === 'all' ? '<i class="cdot all"></i>' : `<i class="cdot" style="background:${clsColor(c)}"></i>`}<span>${c === 'all' ? t('allCls') : clsName(c)}</span>${ic('chev-d')}`;
   }
   /** 资产排行的类别筛选菜单 */
   function openRankMenu(anchor) {
@@ -1340,9 +1361,9 @@
     const cnt = c => DB.assets.filter(a => inCls(a, c)).length;
     const pop = document.createElement('div');
     pop.className = 'popover menu';
-    pop.innerHTML = ['all'].concat(CLASSES).map(c => `<button class="menu-item ${cur === c ? 'on' : ''}" data-k="${c}">
-      ${c === 'all' ? '<i class="cdot all"></i>' : `<i class="cdot" style="background:${CLASS_COLOR[c]}"></i>`}
-      <span>${c === 'all' ? t('allCls') : t('cls_' + c)}</span><em>${cnt(c)}</em></button>`).join('');
+    pop.innerHTML = ['all'].concat(clsKeys()).map(c => `<button class="menu-item ${cur === c ? 'on' : ''}" data-k="${c}">
+      ${c === 'all' ? '<i class="cdot all"></i>' : `<i class="cdot" style="background:${clsColor(c)}"></i>`}
+      <span>${c === 'all' ? t('allCls') : clsName(c)}</span><em>${cnt(c)}</em></button>`).join('');
     document.body.appendChild(pop);
     const r = anchor.getBoundingClientRect(), w = pop.offsetWidth;
     pop.style.left = Math.max(12, Math.min(r.right - w, window.innerWidth - w - 12)) + window.scrollX + 'px';
@@ -1557,7 +1578,7 @@
     if (k === 'year') return openYearCal({ title: t('kpiCalT_year'), sel, hint: t('kpiCalHint_period'), val: invYear, onPick: y => pick(y === tk.slice(0, 4) ? '' : y) });
     if (k === 'total') return openDayCal({ title: t('kpiCalT_total'), sel, monthSum: false, hint: t('kpiCalHint_total'), val: d => { const r = invTotalAt(d); return r ? r.pnl : null; }, onPick: d => pick(d === tk ? '' : d) });
     const c = k.startsWith('cls_') ? k.slice(4) : '';
-    openDayCal({ title: c ? t('kpiCalT_cls', { c: t('cls_' + c) }) : t('kpiCalT_day'), sel, hint: t('kpiCalHint_day'),
+    openDayCal({ title: c ? t('kpiCalT_cls', { c: clsName(c) }) : t('kpiCalT_day'), sel, hint: t('kpiCalHint_day'),
       val: d => { const r = invDay(d, c); return r ? r.pnl : null; }, onPick: d => pick(d === tk ? '' : d) });
   }
   function renderMoves() {
@@ -1579,7 +1600,7 @@
         const a = x.a, z = Math.abs(x.ch) < 0.005;
         return `<div class="rank-row ${z ? 'zero' : ''}">
           <span class="rank-no">${i + 1}</span>
-          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}${a.warehouse ? `<span class="rk-wh">${esc(a.warehouse)}</span>` : ''}</div>
+          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${clsColor(primary(a))}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}${a.warehouse ? `<span class="rk-wh">${esc(a.warehouse)}</span>` : ''}</div>
             <div class="bar"><i style="width:${z ? 0 : Math.max(2, (Math.abs(x.ch) / top) * 100)}%;background:${x.ch < 0 ? 'var(--down)' : 'var(--up)'}"></i></div></div>
           <div class="rank-val num ${z ? 'dim' : upDown(x.ch)}">${z ? '—' : money(x.ch, { sign: true })}<small class="${z ? 'dim' : upDown(x.ch)}">${z ? t('noChange') : pct(x.pct)}${day ? '' : ' · ' + money(aValD(a))}</small></div>
         </div>`;
@@ -1601,7 +1622,7 @@
         const a = x.a, bal = isBalance(a), cost = aCostD(a), pnl = x.v - cost;
         return `<div class="rank-row">
           <span class="rank-no">${i + 1}</span>
-          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${CLASS_COLOR[primary(a)]}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}${a.warehouse ? `<span class="rk-wh">${esc(a.warehouse)}</span>` : ''}</div>
+          <div style="min-width:0"><div class="rank-name"><i class="cdot" style="background:${clsColor(primary(a))}"></i><span class="nm">${esc(a.name)}</span>${a.code ? `<span class="code">${esc(a.code)}</span>` : ''}${a.locked ? ic('lock', 'lk') : ''}${a.warehouse ? `<span class="rk-wh">${esc(a.warehouse)}</span>` : ''}</div>
             <div class="bar"><i style="width:${Math.max(2, (Math.abs(x.v) / topV) * 100)}%;${x.v < 0 ? 'background:var(--down)' : ''}"></i></div></div>
           <div class="rank-val num ${x.v < 0 ? 'down' : ''}">${money(x.v)}<small class="${bal ? 'dim' : upDown(pnl)}">${bal ? ((Math.max(0, x.v) / total) * 100).toFixed(1) + '% · ' + clsLabel(a) : pct(cost ? (pnl / Math.abs(cost)) * 100 : 0)}</small></div>
         </div>`;
@@ -1783,9 +1804,9 @@
   function renderHoldings() {
     const H = UI.hold;
     const counts = { all: DB.assets.length };
-    CLASSES.forEach(c => { counts[c] = DB.assets.filter(a => inCls(a, c)).length; });
-    const chips = ['all'].concat(CLASSES).map(c =>
-      `<button class="chip ${H.cls === c ? 'on' : ''}" data-action="hold-filter" data-v="${c}">${c !== 'all' ? `<i class="cdot" style="background:${CLASS_COLOR[c]}"></i>` : ''}${c === 'all' ? t('all') : t('cls_' + c)}<em>${counts[c]}</em></button>`).join('');
+    clsKeys().forEach(c => { counts[c] = DB.assets.filter(a => inCls(a, c)).length; });
+    const chips = ['all'].concat(clsKeys()).map(c =>
+      `<button class="chip ${H.cls === c ? 'on' : ''}" data-action="hold-filter" data-v="${c}">${c !== 'all' ? `<i class="cdot" style="background:${clsColor(c)}"></i>` : ''}${c === 'all' ? t('all') : clsName(c)}<em>${counts[c]}</em></button>`).join('');
     $('#page').innerHTML = `
       <div class="section-head">
         <h2>${t('holdTitle')}</h2>
@@ -1802,7 +1823,7 @@
         <span class="src-tool">${whFilterHTML(false)}</span>
         ${colBtnHTML('hold')}
       </div>
-      <div class="chips mb">${chips}</div>
+      <div class="chips mb">${chips}<button class="chip chip-tool" data-action="asset-cats">${ic('sliders')}${t('assetMgrS')}</button></div>
       <div id="batch-bar"></div>
       <div id="hold-body"></div>`;
     renderHoldBody();
@@ -1886,7 +1907,7 @@
     const sortTh = (k, label) => ({ thCls: `r sortable ${H.sort === k + 'Desc' || H.sort === k + 'Asc' ? 'on' : ''}`, thAttr: `data-action="hold-sort-head" data-v="${k}"`, th: `${label}<span class="arr">${H.sort === k + 'Asc' ? '↑' : '↓'}</span>` });
     const cc = r => ({ a: r.a, ccy: aCcy(r.a), bal: isBalance(r.a), orig: aCcy(r.a) !== D });
     return [
-      { k: 'name', label: t('colNameOnly'), lock: true, th: t('colNameOnly'), td: r => `<div class="nmcell"><b class="nm-pill" style="--tc:${CLASS_COLOR[primary(r.a)]}">${esc(r.a.name)}</b>${r.a.locked ? ic('lock', 'lk') : ''}</div>${r.a.note ? `<small>${esc(r.a.note)}</small>` : ''}` },
+      { k: 'name', label: t('colNameOnly'), lock: true, th: t('colNameOnly'), td: r => `<div class="nmcell"><b class="nm-pill" style="--tc:${clsColor(primary(r.a))}">${esc(r.a.name)}</b>${r.a.locked ? ic('lock', 'lk') : ''}</div>${r.a.note ? `<small>${esc(r.a.note)}</small>` : ''}` },
       { k: 'code', label: t('colCode'), th: t('colCode'), td: r => (r.a.code ? `<span class="code">${esc(r.a.code)}</span>` : '<span class="dim">—</span>') },
       { k: 'cls', label: t('colClass'), th: t('colClass'), td: r => `<div class="tags">${tagHTML(r.a)}</div>` },
       { k: 'wh', label: t('colWh'), th: whFilterHTML(true), tdCls: 'wh', td: r => (r.a.warehouse ? esc(r.a.warehouse) : '<span class="dim">—</span>') },
@@ -1966,7 +1987,7 @@
     const H = UI.hold, cnt = {};
     DB.assets.forEach(a => { const w = a.warehouse || ''; cnt[w] = (cnt[w] || 0) + 1; });
     if (H.wh !== '__all' && cnt[H.wh] == null) H.wh = '__all';   // 筛选的仓库已不存在
-    const names = Object.keys(cnt).filter(Boolean).sort((x, y) => cnt[y] - cnt[x] || x.localeCompare(y));
+    whList(); const names = Object.keys(cnt).filter(Boolean).sort((x, y) => whOrd(x) - whOrd(y) || cnt[y] - cnt[x] || x.localeCompare(y));
     const opt = (v, label) => `<option value="${esc(v)}" ${H.wh === v ? 'selected' : ''}>${esc(label)}</option>`;
     return `<label class="mini-select ${compact ? 'th-select' : ''}">${compact ? '' : ic('db')}<select data-change="holdWh">${
       opt('__all', compact ? t('colWh') : `${t('whAll')} (${DB.assets.length})`) + names.map(w => opt(w, `${w} (${cnt[w]})`)).join('') + (cnt[''] ? opt('', `${t('whNone')} (${cnt['']})`) : '')}</select></label>`;
@@ -2126,51 +2147,114 @@
     if (hit) return hit.k;
     const k = 'c' + uid(); list.push({ k, n: name, c: '' }); return k;
   }
-  /** 分类管理（订阅弹窗里内嵌 / 订阅页单独弹窗共用） */
-  function catMgrHTML() {
-    const list = subCatList();
-    return list.map((x, i) => { const n = DB.subs.filter(s => s.cat === x.k).length; return `<div class="cm-row" data-c="${esc(x.k)}">
-        <label class="cm-color" style="--cc:${subCatColor(x.k)}" title="${t('subCatColor')}"><input type="color" value="${subCatColor(x.k)}" data-cm-color></label>
-        <input class="input" value="${esc(subCatName(x.k))}" maxlength="20" data-cm-name>
-        <span class="dim">${t('subNSubs', { n })}</span>
+  /** 通用列表管理（订阅分类 / 资产类别 / 仓库共用）：改名、改颜色、上下排序、删除、新增
+      spec: { list() 背后的数组, key(x), name(k), color(k)（无 = 不显示色点）, count(k), unit, canDel(k), delTip,
+              rename(k, v) → 'exists' | 真, recolor(k, c), add(name) → 'exists' | 真, del(k)（async，自己确认）, hint, ph } */
+  function mgrHTML(sp) {
+    const list = sp.list();
+    return list.map((x, i) => { const k = sp.key(x), col = sp.color && sp.color(k), cd = sp.canDel ? sp.canDel(k) : true; return `<div class="cm-row${col ? '' : ' nocolor'}" data-c="${esc(k)}">
+        ${col ? `<label class="cm-color" style="--cc:${col}" title="${t('subCatColor')}"><input type="color" value="${col}" data-cm-color></label>` : '<span></span>'}
+        <input class="input" value="${esc(sp.name(k))}" maxlength="40" data-cm-name>
+        <span class="dim">${t(sp.unit || 'subNSubs', { n: sp.count(k) })}</span>
         <button type="button" class="icon-btn sm" data-cm-mv="-1" ${i ? '' : 'disabled'} title="${t('moveUp')}">${ic('chev-u')}</button>
         <button type="button" class="icon-btn sm" data-cm-mv="1" ${i < list.length - 1 ? '' : 'disabled'} title="${t('moveDown')}">${ic('chev-d')}</button>
-        <button type="button" class="icon-btn sm" data-cm-del title="${t('del')}">${ic('trash')}</button></div>`; }).join('') +
-      `<div class="cm-add"><input class="input" maxlength="20" placeholder="${t('subCatNewPh')}" data-cm-new><button type="button" class="btn btn-glass sm" data-cm-add>${ic('plus')}${t('subCatAdd')}</button></div>
-      <p class="hint">${t('subCatManageHint')}</p>`;
+        <button type="button" class="icon-btn sm" data-cm-del ${cd ? '' : 'disabled'} title="${cd ? t('del') : esc(sp.delTip || '')}">${ic('trash')}</button></div>`; }).join('') +
+      `<div class="cm-add"><input class="input" maxlength="40" placeholder="${esc(sp.ph || t('subCatNewPh'))}" data-cm-new><button type="button" class="btn btn-glass sm" data-cm-add>${ic('plus')}${t('subCatAdd')}</button></div>
+      <p class="hint">${sp.hint || t('subCatManageHint')}</p>`;
   }
-  function bindCatMgr(box, onChange) {
-    const draw = () => { box.querySelector('.cm-body').innerHTML = catMgrHTML(); };
+  function bindMgr(box, sp, onChange) {
+    const draw = () => { box.querySelector('.cm-body').innerHTML = mgrHTML(sp); };
     const done = () => { commit(); draw(); if (onChange) onChange(); };
-    const keyOf = el => el.closest('.cm-row').dataset.c, itemOf = k => subCatList().find(x => x.k === k);
+    const keyOf = el => el.closest('.cm-row').dataset.c;
+    box._draw = draw;
     box.addEventListener('click', async e => {
       const mv = e.target.closest('[data-cm-mv]');
-      if (mv && !mv.disabled) { const list = subCatList(), i = list.findIndex(x => x.k === keyOf(mv)), j = i + +mv.dataset.cmMv; [list[i], list[j]] = [list[j], list[i]]; done(); return; }
+      if (mv && !mv.disabled) { const list = sp.list(), i = list.findIndex(x => sp.key(x) === keyOf(mv)), j = i + +mv.dataset.cmMv; [list[i], list[j]] = [list[j], list[i]]; done(); return; }
       if (e.target.closest('[data-cm-add]')) {
         const inp = box.querySelector('[data-cm-new]'), name = inp.value.trim(); if (!name) { inp.focus(); return; }
-        const had = subCats().length; findOrAddCat(name);
-        if (subCats().length === had) toast(t('subCatExists'), 'err'); else done();
+        if (sp.add(name) === 'exists') toast(t('subCatExists'), 'err'); else done();
         return;
       }
-      const del = e.target.closest('[data-cm-del]'); if (!del) return;
-      const k = keyOf(del), name = subCatName(k), n = DB.subs.filter(x => x.cat === k).length;
-      if (!(await confirmDialog({ title: t('subCatDelT'), msg: t('subCatDelM', { c: esc(name), n }), ok: t('del') }))) return;
-      DB.subs.filter(x => x.cat === k).forEach(x => { logOp('sub', x, 'edit', [['cat', name, '']]); x.cat = ''; });
-      DB.meta.subCats = subCatList().filter(x => x.k !== k);
-      done(); toast(t('subCatDeleted', { c: name }), 'ok');
+      const del = e.target.closest('[data-cm-del]'); if (!del || del.disabled) return;
+      if (await sp.del(keyOf(del))) done();
     });
     box.addEventListener('change', e => {
       const nm = e.target.closest('[data-cm-name]'), cl = e.target.closest('[data-cm-color]');
-      if (nm) { const x = itemOf(keyOf(nm)), v = nm.value.trim(); if (!v) { nm.value = subCatName(x.k); return; } x.n = v; done(); }
-      if (cl) { itemOf(keyOf(cl)).c = cl.value; done(); }
+      if (nm) { const k = keyOf(nm), v = nm.value.trim(); if (!v || v === sp.name(k)) { nm.value = sp.name(k); return; } if (sp.rename(k, v) === 'exists') { toast(t('subCatExists'), 'err'); nm.value = sp.name(k); return; } done(); }
+      if (cl) { sp.recolor(keyOf(cl), cl.value); done(); }
     });
     box.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest('[data-cm-new]')) { e.preventDefault(); box.querySelector('[data-cm-add]').click(); } });
     draw();
   }
-  function openCatMgr() {
-    openModal({ title: t('subCatManage'), body: `<div class="cat-mgr solo"><div class="cm-body"></div></div>`, footer: `<button class="btn btn-accent" data-modal-close>${ic('check')}${t('done')}</button>`,
-      onMount(m) { bindCatMgr($('.cat-mgr', m), () => { if (UI.page === 'subs') renderSubs(); }); } });
+  function openMgr(title, sp, onChange) {
+    openModal({ title, body: `<div class="cat-mgr solo"><div class="cm-body"></div></div>`, footer: `<button class="btn btn-accent" data-modal-close>${ic('check')}${t('done')}</button>`,
+      onMount(m) { bindMgr($('.cat-mgr', m), sp, onChange); } });
   }
+  const SUB_CAT_SPEC = {
+    list: subCatList, key: x => x.k, name: subCatName, color: subCatColor, count: k => DB.subs.filter(s => s.cat === k).length,
+    rename(k, v) { const o = subCatList().find(x => x.k !== k && subCatName(x.k).toLowerCase() === v.toLowerCase()); if (o) return 'exists'; subCatList().find(x => x.k === k).n = v; return true; },
+    recolor(k, c) { subCatList().find(x => x.k === k).c = c; },
+    add(name) { const had = subCats().length; findOrAddCat(name); return subCats().length === had ? 'exists' : true; },
+    async del(k) {
+      const name = subCatName(k), n = DB.subs.filter(x => x.cat === k).length;
+      if (!(await confirmDialog({ title: t('subCatDelT'), msg: t('subCatDelM', { c: esc(name), n }), ok: t('del') }))) return false;
+      DB.subs.filter(x => x.cat === k).forEach(x => { logOp('sub', x, 'edit', [['cat', name, '']]); x.cat = ''; });
+      DB.meta.subCats = subCatList().filter(x => x.k !== k);
+      toast(t('subCatDeleted', { c: name }), 'ok'); return true;
+    }
+  };
+  const ASSET_CLS_SPEC = {
+    list: clsList, key: x => x.k, name: clsName, color: clsColor, unit: 'nAssets', count: k => DB.assets.filter(a => tagsOf(a).includes(k)).length,
+    canDel: k => !CLASSES.includes(k), get delTip() { return t('clsBuiltinTip'); },
+    get hint() { return t('clsMgrHint'); }, get ph() { return t('clsNewPh'); },
+    rename(k, v) { if (clsList().some(x => x.k !== k && clsName(x.k).toLowerCase() === v.toLowerCase())) return 'exists'; clsItem(k).n = v; return true; },
+    recolor(k, c) { clsItem(k).c = c; },
+    add(name) { if (clsList().some(x => clsName(x.k).toLowerCase() === name.toLowerCase())) return 'exists'; clsList().push({ k: 'x' + uid(), n: name, c: '' }); return true; },
+    async del(k) {
+      const name = clsName(k), hit = DB.assets.filter(a => tagsOf(a).includes(k));
+      if (!(await confirmDialog({ title: t('clsDelT'), msg: t('clsDelM', { c: esc(name), n: hit.length, o: esc(clsName('other')) }), ok: t('del') }))) return false;
+      hit.forEach(a => { const nc = tagsOf(a).filter(c => c !== k); a.cls = nc.length ? nc : ['other']; logOp('asset', a, 'edit', [['cls', [k], a.cls.slice()]]); a.updatedAt = Date.now(); });
+      DB.meta.assetCls = clsList().filter(x => x.k !== k);
+      if (UI.hold.cls === k) UI.hold.cls = 'all';
+      Object.keys(S()).forEach(x => { if (/^rank/.test(x) && S()[x] === k) S()[x] = 'all'; });
+      toast(t('subCatDeleted', { c: name }), 'ok'); return true;
+    }
+  };
+  const WH_SPEC = {
+    list: whList, key: x => x, name: k => k, unit: 'nAssets', count: k => DB.assets.filter(a => a.warehouse === k).length,
+    get hint() { return t('whMgrHint'); }, get ph() { return t('whNewPh'); },
+    rename(k, v) {
+      const list = whList(); if (list.includes(v)) return 'exists';
+      list[list.indexOf(k)] = v;
+      DB.assets.filter(a => a.warehouse === k).forEach(a => { logOp('asset', a, 'edit', [['warehouse', k, v]]); a.warehouse = v; a.updatedAt = Date.now(); });
+      if (UI.hold.wh === k) UI.hold.wh = v;
+      return true;
+    },
+    add(name) { const list = whList(); if (list.includes(name)) return 'exists'; list.push(name); return true; },
+    async del(k) {
+      const hit = DB.assets.filter(a => a.warehouse === k);
+      if (hit.length && !(await confirmDialog({ title: t('whDelT'), msg: t('whDelM', { c: esc(k), n: hit.length }), ok: t('del') }))) return false;
+      hit.forEach(a => { logOp('asset', a, 'edit', [['warehouse', k, '']]); a.warehouse = ''; a.updatedAt = Date.now(); });
+      DB.meta.whs = whList().filter(x => x !== k);
+      if (UI.hold.wh === k) UI.hold.wh = '__all';
+      toast(t('mgrDeleted', { c: k }), 'ok'); return true;
+    }
+  };
+  /** 资产明细：资产类别 / 仓库 管理（两个标签页） */
+  function openAssetMgr(tab) {
+    const rerender = () => renderPage();
+    openModal({ title: t('assetMgrT'),
+      body: `<div class="seg seg-full mb" id="am-tab"><button type="button" data-v="cls">${t('assetClass')}</button><button type="button" data-v="wh">${t('warehouse')}</button></div>
+        <div class="cat-mgr solo" id="am-cls"><div class="cm-body"></div></div><div class="cat-mgr solo" id="am-wh"><div class="cm-body"></div></div>`,
+      footer: `<button class="btn btn-accent" data-modal-close>${ic('check')}${t('done')}</button>`,
+      onMount(m) {
+        bindMgr($('#am-cls', m), ASSET_CLS_SPEC, rerender); bindMgr($('#am-wh', m), WH_SPEC, rerender);
+        const show = v => { $$('#am-tab button', m).forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('#am-cls', m).style.display = v === 'cls' ? '' : 'none'; $('#am-wh', m).style.display = v === 'wh' ? '' : 'none'; };
+        $('#am-tab', m).addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) show(b.dataset.v); });
+        show(tab || 'cls');
+      } });
+  }
+  function openCatMgr() { openMgr(t('subCatManage'), SUB_CAT_SPEC, () => { if (UI.page === 'subs') renderSubs(); }); }
   const dOf = k => new Date(k + 'T00:00:00');
   /** 日期加减：月 / 年按日历走（1 月 31 日 + 1 个月 = 2 月 28 日） */
   function addDate(k, n, u) {
@@ -2689,11 +2773,11 @@
         const refreshCats = () => { const sel = $('#sf-cat', m); sel.innerHTML = subCatOptions(subCats().includes(catPrev) ? catPrev : ''); };
         const mgr = $('#sf-cat-mgr', m);
         mgr.innerHTML = `<div class="cm-h"><b>${t('subCatManage')}</b><button type="button" class="link" data-cm-close>${t('close')}</button></div><div class="cm-body"></div>`;
-        bindCatMgr(mgr, refreshCats);
+        bindMgr(mgr, SUB_CAT_SPEC, refreshCats);
         mgr.addEventListener('click', e => { if (e.target.closest('[data-cm-close]')) mgr.style.display = 'none'; });
         $('#sf-cat', m).addEventListener('change', e => {
           const v = e.target.value;
-          if (v === '__manage') { e.target.value = catPrev; mgr.querySelector('.cm-body').innerHTML = catMgrHTML(); mgr.style.display = ''; return; }
+          if (v === '__manage') { e.target.value = catPrev; mgr._draw(); mgr.style.display = ''; return; }
           if (v !== '__custom') catPrev = v;
           const c = v === '__custom'; $('#sf-cat-c', m).style.display = c ? '' : 'none'; if (c) $('#sf-cat-c', m).focus();
         });
@@ -3147,7 +3231,7 @@
   function whGroups() {
     const g = {};
     DB.assets.forEach(a => { const w = a.warehouse || ''; (g[w] = g[w] || []).push(a); });
-    const keys = Object.keys(g).filter(Boolean).sort((x, y) => g[y].length - g[x].length || x.localeCompare(y));
+    whList(); const keys = Object.keys(g).filter(Boolean).sort((x, y) => whOrd(x) - whOrd(y) || g[y].length - g[x].length || x.localeCompare(y));
     if (g['']) keys.push('');
     return keys.map(k => ({ label: k || t('whNone'), list: g[k] }));
   }
@@ -3197,7 +3281,7 @@
       <div class="tf-new" id="tf-new" style="display:none">
         <div class="tf-new-h">${ic('plus')}<b>${t('newAssetT')}</b><small>${t('newAssetSub')}</small></div>
         <div class="row2">
-          <div class="field"><label>${t('assetClass')}</label><select class="input" id="tn-cls">${CLASSES.filter(c => c !== 'liability').map(c => `<option value="${c}">${t('cls_' + c)}</option>`).join('')}</select></div>
+          <div class="field"><label>${t('assetClass')}</label><select class="input" id="tn-cls">${clsKeys().filter(c => c !== 'liability').map(c => `<option value="${c}">${clsName(c)}</option>`).join('')}</select></div>
           <div class="field"><label>${t('priceCcy')}</label><select class="input" id="tn-ccy">${txCcyList().map(c => `<option value="${c}">${CCY_SHORT[c] || c}</option>`).join('')}</select></div>
         </div>
         <div class="row2">
@@ -3205,7 +3289,7 @@
           <div class="field"><label>${t('assetName')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="tn-name" maxlength="40" autocomplete="off"></div>
         </div>
         <div class="field" style="margin-bottom:0"><label>${t('warehouse')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="tn-wh" list="tn-wh-list" maxlength="40" placeholder="${t('warehousePh')}">
-          <datalist id="tn-wh-list">${Array.from(new Set(WAREHOUSE_PRESETS.concat(DB.assets.map(a => a.warehouse).filter(Boolean)))).map(w => `<option value="${esc(w)}">`).join('')}</datalist></div>
+          <datalist id="tn-wh-list">${whList().slice().map(w => `<option value="${esc(w)}">`).join('')}</datalist></div>
       </div>
       <div class="hint" id="tf-val-hint" style="display:none;margin:-6px 0 12px"></div>
       <div id="tf-fee-wrap" style="display:none">
@@ -3555,10 +3639,10 @@
     if (!ex && isBalance(f)) { f.ccy = S().ccy; f.source = 'manual'; }
     const isStd = DISPLAY_CCYS.includes(aCcy(f));
     const num = v => (v === '' || v == null ? '' : esc(trim8(v)));
-    const whs = Array.from(new Set(WAREHOUSE_PRESETS.concat(DB.assets.map(a => a.warehouse).filter(Boolean))));
+    const whs = whList().slice();
     const body = `
       <div class="field"><label>${t('assetClass')} <span class="dim">· ${t('multiOk')}</span></label>
-        <div class="cls-grid" id="af-cls">${CLASSES.map(c => `<button type="button" data-v="${c}" class="${f.cls.includes(c) ? 'on' : ''}" style="--tc:${CLASS_COLOR[c]}"><i class="cdot"></i>${t('cls_' + c)}<em>${f.cls[0] === c && f.cls.length > 1 ? t('primary') : ''}</em></button>`).join('')}</div>
+        <div class="cls-grid" id="af-cls">${clsKeys().map(c => `<button type="button" data-v="${c}" class="${f.cls.includes(c) ? 'on' : ''}" style="--tc:${clsColor(c)}"><i class="cdot"></i>${clsName(c)}<em>${f.cls[0] === c && f.cls.length > 1 ? t('primary') : ''}</em></button>`).join('')}</div>
         <div class="hint" id="af-cls-hint"></div></div>
       <div class="row2">
         <div class="field"><label>${t('assetName')}</label><input class="input" id="af-name" value="${esc(f.name)}" maxlength="40"></div>
@@ -3569,7 +3653,7 @@
           <input class="input" id="af-ccy-other" placeholder="${t('ccyOtherPh')}" maxlength="5" value="${isStd ? '' : esc(aCcy(f))}" style="${isStd ? 'display:none' : ''};text-transform:uppercase"></div></div>
       <div class="field"><label>${t('warehouse')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="af-wh" list="af-wh-list" value="${esc(f.warehouse || '')}" maxlength="40" placeholder="${t('warehousePh')}">
           <datalist id="af-wh-list">${whs.map(w => `<option value="${esc(w)}">`).join('')}</datalist>
-          <div class="wh-chips" id="af-wh-chips">${WAREHOUSE_PRESETS.map(w => `<button type="button" data-v="${esc(w)}" class="${f.warehouse === w ? 'on' : ''}">${esc(w)}</button>`).join('')}</div></div>
+          <div class="wh-chips" id="af-wh-chips">${whList().map(w => `<button type="button" data-v="${esc(w)}" class="${f.warehouse === w ? 'on' : ''}">${esc(w)}</button>`).join('')}</div></div>
       <div class="row2">
         <div class="field"><label id="af-qty-l"></label><input class="input num" id="af-qty" inputmode="decimal" autocomplete="off" value="${f.noQty ? '' : num(f.qty)}" placeholder="0.00000000"></div>
         <div class="field" id="af-unit-wrap"><label>${t('unit')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="af-unit" list="af-unit-list" maxlength="12" value="${esc(unitLabel(f.unit))}" placeholder="${t('unitPh')}" autocomplete="off">
@@ -3627,9 +3711,10 @@
           $('#af-qty-l', m).innerHTML = bal ? t('cashBalance') : `${t('colQty')} <span class="dim">· ${t('codeOpt')}</span>`;
           $('#af-qty', m).placeholder = bal ? '0.00' : t('qtyPh');
           const p = a.cls[0];
-          $('#af-name', m).placeholder = t('namePh_' + p);
-          $('#af-code', m).placeholder = t('codePh_' + p);
-          $('#af-cls-hint', m).textContent = a.cls.map(c => t('clsHint_' + c)).join(' ');
+          const pk = CLASSES.includes(p) ? p : 'other';
+          $('#af-name', m).placeholder = t('namePh_' + pk);
+          $('#af-code', m).placeholder = t('codePh_' + pk);
+          $('#af-cls-hint', m).textContent = a.cls.filter(c => CLASSES.includes(c)).map(c => t('clsHint_' + c)).join(' ');
           $('#af-fetch', m).disabled = !Api.canQuote(a);
           preview();
         };
@@ -3782,7 +3867,7 @@
       return esc(String(v));
     }
     if (v === '' || v == null) return '<span class="dim">∅</span>';
-    if (f === 'cls') return esc((Array.isArray(v) ? v : [v]).map(c => t('cls_' + c)).join(' · '));
+    if (f === 'cls') return esc((Array.isArray(v) ? v : [v]).map(c => clsName(c)).join(' · '));
     if (f === 'subId') { const sb = findSub(v); return esc(sb ? sb.name : t('subDeleted')); }
     if (f === 'accountId' || f === 'toId' || f === 'feeId') { const a = findAsset(v); return esc(a ? a.name : t('deletedAccount')); }
     if (f === 'cat') return esc(catName(v));
@@ -4202,6 +4287,7 @@
     'add-sub'() { openSubModal(); },
     cols(el) { openColsModal(el.dataset.v); },
     'sub-cats'() { openCatMgr(); },
+    'asset-cats'() { openAssetMgr(); },
     async 'edit-sub'(el) {
       const s = findSub(el.dataset.id); if (!s) return;
       if (!(await requireUnlock(s.locked ? t('verifyLockedMsg') : t('verifySubMsg'), s.locked))) return;
