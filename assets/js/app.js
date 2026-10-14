@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -969,7 +969,11 @@
   /* ---- 记账 ---- */
   // 转账可在任意资产之间进行：amount / fee 是转出资产的“数量”（现金类即金额），value / feeValue 是折算成 ccy 的价值
   const txD = x => conv(x.type === 'transfer' && x.value != null ? +x.value : +x.amount || 0, x.ccy || S().ccy);
-  const feeD = x => (x.type === 'transfer' && x.fee > 0 ? conv(x.feeValue != null ? +x.feeValue : +x.fee, x.feeCcy || x.ccy || S().ccy) : 0);
+  const feeD = x => (x.type === 'transfer' && x.fee > 0 ? conv(x.feeValue != null ? +x.feeValue : +x.fee, x.feeCcy || x.ccy || S().ccy) : 0) + Math.max(0, -recvD(x));
+  /** 同币种转账到账 ≠ 转出：正 = 红包 / 优惠（计收入），负 = 到账扣费（计支出，并入手续费） */
+  const recvD = x => (x.type === 'transfer' && x.recvDiff ? conv(+x.recvDiff, x.toCcy || x.ccy || S().ccy) : 0);
+  const bonusD = x => Math.max(0, recvD(x));
+  const recvTag = x => (x.type === 'transfer' && x.recvDiff ? `<small class="${x.recvDiff > 0 ? 'up' : 'down'}">${t(x.recvDiff > 0 ? 'recvBonusS' : 'recvLossS')} ${money(Math.abs(x.recvDiff), { ccy: x.toCcy || x.ccy, max: 8, sign: false })}</small>` : '');
   /** 手续费显示：单独的手续费账户按它自己的数量 / 币种显示（如 0.0012 BNB） */
   const feeTxt = x => qtyTxt(x.fee, x.feeId ? x.feeUnit : x.fromUnit, x.feeCcy || x.ccy) + (x.feeId && !x.feeUnit ? ` · ${esc(acctName(x.feeId))}` : '');
   /** 数量单位：现金 / 负债按金额（返回空串），其他资产按代码或单位 */
@@ -980,7 +984,7 @@
   const catName = c => t('cat_' + c);
   function statsOf(pred) {
     const r = { inc: 0, exp: 0, n: 0 };
-    DB.txs.forEach(x => { if (!pred(x)) return; if (x.type === 'transfer') { r.exp += feeD(x); return; } r.n++; if (x.type === 'income') r.inc += txD(x); else r.exp += txD(x); });
+    DB.txs.forEach(x => { if (!pred(x)) return; if (x.type === 'transfer') { r.exp += feeD(x); r.inc += bonusD(x); return; } r.n++; if (x.type === 'income') r.inc += txD(x); else r.exp += txD(x); });
     return r;
   }
   const sortTxDate = list => list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.createdAt || 0) - (a.createdAt || 0)));
@@ -1662,7 +1666,7 @@
     DB.txs.forEach(x => {
       const k = range === 'year' ? x.date.slice(0, 7) : x.date;
       if (!map[k]) return;
-      if (x.type === 'transfer') { map[k].exp += feeD(x); return; }
+      if (x.type === 'transfer') { map[k].exp += feeD(x); map[k].inc += bonusD(x); return; }
       if (x.type === 'income') map[k].inc += txD(x); else map[k].exp += txD(x);
     });
     const cur = range === 'year' ? tk.slice(0, 7) : tk;
@@ -1785,7 +1789,7 @@
       <div class="tx-main"><div class="tx-title">${catName(x.cat)}${subLinkTag(x)}${x.note ? `<span class="nt">${esc(x.note)}</span>` : ''}</div>
         <div class="tx-meta">${x.date} · ${esc(txAcct(x))}${txWh(x) ? ` <span class="wh-tag">${ic('db')}${esc(txWh(x))}</span>` : ''}</div></div>
       <div class="tx-amt num ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}
-        ${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${feeTxt(x)}</small>` : ''}
+        ${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${feeTxt(x)}</small>` : ''}${recvTag(x)}
         ${withOps && !batch ? `<div class="tx-ops">${histBtn('tx', x.id)}<button class="op edit" data-action="edit-tx" data-id="${x.id}">${ic('edit')}</button><button class="op del" data-action="del-tx" data-id="${x.id}">${ic('trash')}</button></div>` : ''}
       </div></div>`;
   }
@@ -2098,7 +2102,7 @@
       body = L.sort.startsWith('amt')
         ? `<div class="card glass"><div class="tx-list">${list.map(x => txRowHTML(x, true, L.batch)).join('')}</div></div>`
         : `<div class="card glass"><div class="tx-list">${keys.map(d => {
-          const net = groups[d].reduce((s, x) => s + txSign(x) * txD(x) - feeD(x), 0);
+          const net = groups[d].reduce((s, x) => s + txSign(x) * txD(x) - feeD(x) + bonusD(x), 0);
           return `<div class="day-head"><span>${dayLabel(d)}</span><span class="num">${money(net, { sign: true })}</span></div>${groups[d].map(x => txRowHTML(x, true, L.batch)).join('')}`;
         }).join('')}</div></div>`;
     } else {
@@ -2115,7 +2119,7 @@
             <td><span style="margin-right:6px">${CAT_ICON[x.cat] || ''}</span>${catName(x.cat)}${subLinkTag(x)}</td>
             <td class="muted">${esc(txAcct(x))}${txWh(x) ? `<small class="wh-sm">${ic('db')}${esc(txWh(x))}</small>` : ''}${x.applied ? `<small>${t('synced')}</small>` : ''}</td>
             <td class="note" title="${esc(x.note)}">${esc(x.note) || '<span class="dim">—</span>'}</td>
-            <td class="r num strong ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.type === 'transfer' && (x.toUnit || x.fromUnit || (x.toCcy && x.toCcy !== x.ccy)) ? `<small>${t('received')} ${qtyTxt(x.toAmount, x.toUnit, x.toCcy)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${feeTxt(x)}</small>` : ''}</td>
+            <td class="r num strong ${txCls(x)}">${txAmt(x, null, txD(x), orig ? 2 : 8)}${x.fromUnit ? `<small>${qtyTxt(x.amount, x.fromUnit)}</small>` : orig ? `<small>${txAmt(x, x.ccy, x.amount, 8)}</small>` : ''}${x.type === 'transfer' && (x.toUnit || x.fromUnit || (x.toCcy && x.toCcy !== x.ccy)) ? `<small>${t('received')} ${qtyTxt(x.toAmount, x.toUnit, x.toCcy)}</small>` : ''}${x.fee > 0 ? `<small class="down">${t('fee')} ${feeTxt(x)}</small>` : ''}${recvTag(x)}</td>
             <td class="c">${L.batch ? '' : `<div class="ops">${histBtn('tx', x.id)}<button class="op edit" data-action="edit-tx" data-id="${x.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-tx" data-id="${x.id}">${ic('trash')}${t('del')}</button></div>`}</td>
           </tr>`;
         }).join('')}</tbody></table></div></div>`;
@@ -3303,7 +3307,7 @@
       </div>
       <div class="row2" id="tf-to-row" style="display:none">
         <div class="field"><label>${t('transferTo')}</label><select class="input" id="tf-to">${balOptions(st.toId, '', NEW_OPT())}</select></div>
-        <div class="field" id="tf-recv-wrap" style="visibility:hidden"><label id="tf-recv-l">${t('received')}</label><input class="input num" id="tf-recv" inputmode="decimal" autocomplete="off" value="${st.toAmount != null ? esc(trim8(st.toAmount)) : ''}"></div>
+        <div class="field" id="tf-recv-wrap" style="visibility:hidden"><label id="tf-recv-l">${t('received')}</label><input class="input num" id="tf-recv" inputmode="decimal" autocomplete="off" value="${st.toAmount != null ? esc(trim8(st.toAmount)) : ''}"><div class="recv-diff" id="tf-recv-diff"></div></div>
       </div>
       <div class="tf-new" id="tf-new" style="display:none">
         <div class="tf-new-h">${ic('plus')}<b>${t('newAssetT')}</b><small>${t('newAssetSub')}</small></div>
@@ -3407,7 +3411,19 @@
           if (showAvg) parts.push(t('newAssetAvg', { p: money(conv(val, aCcy(f), aCcy(to)) / recv, { ccy: aCcy(to), max: 8, raw: true }), u: esc(tu) }));
           vh.innerHTML = parts.join('<br>');
           const diff = f && to && (isNew ? !(isBalance(to) && !fu && aCcy(f) === aCcy(to)) : (fu || tu || aCcy(f) !== aCcy(to)));
-          $('#tf-recv-wrap', m).style.visibility = diff ? 'visible' : 'hidden';
+          // 同币种现金类互转也显示「到账金额」：默认 = 转出金额，可改（红包抵扣 / 到账扣费时两者不一样）
+          const same = f && to && !diff;
+          $('#tf-recv-wrap', m).style.visibility = f && to ? 'visible' : 'hidden';
+          const dEl = $('#tf-recv-diff', m); dEl.innerHTML = ''; dEl.className = 'recv-diff';
+          if (same) {
+            $('#tf-recv-l', m).textContent = `${t('received')} (${aCcy(to)})`;
+            if (!recvTouched) $('#tf-recv', m).value = amt > 0 ? trim8(amt) : '';
+            const rv = parseNum($('#tf-recv', m).value), dv = amt > 0 && rv > 0 ? round8(rv - amt) : 0;
+            if (Math.abs(dv) > 1e-9) {
+              dEl.className = `recv-diff ${dv > 0 ? 'up' : 'down'}`;
+              dEl.innerHTML = t(dv > 0 ? 'recvBonus' : 'recvLoss', { v: money(Math.abs(dv), { ccy: aCcy(to), max: 8, raw: true }) });
+            }
+          }
           if (diff) {
             $('#tf-recv-l', m).textContent = `${t('received')} (${tu || aCcy(to)})`;
             const px = unitPx(to);
@@ -3489,8 +3505,7 @@
         ['#tn-cls', '#tn-ccy', '#tn-code', '#tn-name', '#tn-wh'].forEach(q => $(q, m).addEventListener('input', trSync));
         $('#tn-cls', m).addEventListener('change', () => { recvTouched = false; trSync(); });
         $('#tf-fee-acct', m).addEventListener('change', trSync);
-        $('#tf-recv', m).addEventListener('input', trSync);
-        $('#tf-recv', m).addEventListener('input', () => { recvTouched = true; });
+        $('#tf-recv', m).addEventListener('input', () => { recvTouched = true; trSync(); });
         $('#tf-fee', m).addEventListener('input', trSync);
         $('#tf-amount', m).addEventListener('input', trSync);
         $('#tf-amount', m).addEventListener('input', syncRow);
@@ -3547,8 +3562,13 @@
               if (!(rq > 0)) { toast(t('errRecv'), 'err'); $('#tf-recv', m).focus(); return; }
               to.price = round8(conv(value, aCcy(f), aCcy(to)) / rq);
             }
-            let toAmount = amount;
-            if (fu || tu || aCcy(f) !== aCcy(to)) {
+            let toAmount = amount, recvDiff = 0;
+            if (!(fu || tu || aCcy(f) !== aCcy(to))) {
+              // 同币种现金类：到账可以和转出不一样（红包 / 优惠抵扣 → 多出的记收入；到账扣费 → 少的记支出）
+              const rv = parseNum($('#tf-recv', m).value);
+              if ($('#tf-recv', m).value.trim() !== '' && !(rv > 0)) { toast(t('errRecv'), 'err'); $('#tf-recv', m).focus(); return; }
+              if (rv > 0) { toAmount = round8(rv); recvDiff = round8(rv - amount); }
+            } else {
               toAmount = parseNum($('#tf-recv', m).value);
               if (!(toAmount > 0)) { const px = unitPx(to); toAmount = px > 0 ? round8(conv(value, aCcy(f), aCcy(to)) / px) : 0; }
               if (!(toAmount > 0)) { toast(t('errRecv'), 'err'); $('#tf-recv', m).focus(); return; }
@@ -3573,6 +3593,7 @@
             Object.keys(tx).forEach(k => { if (!['id', 'createdAt', 'log'].includes(k)) delete tx[k]; });
             Object.assign(tx, { date, type: 'transfer', cat: 'transfer', amount, ccy: aCcy(f), accountId: fromId, toId, toAmount, toCcy: aCcy(to), fee, value, feeValue: round8(fee * unitPx(fa)), note: $('#tf-note', m).value.trim(), applied: true });
             if (feeId) { tx.feeId = feeId; tx.feeCcy = aCcy(fa); if (feeU) tx.feeUnit = feeU; }
+            if (Math.abs(recvDiff) > 1e-9) tx.recvDiff = recvDiff;
             if (fu) tx.fromUnit = fu;
             if (isNew) {
               DB.assets.push(to);
@@ -3599,7 +3620,7 @@
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           if (ex) applyTx(ex, -1);
-          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost'].forEach(k => delete tx[k]);
+          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
           delete tx.appliedPx; delete tx.appliedCost;
           const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;

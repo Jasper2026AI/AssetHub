@@ -1230,3 +1230,7 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
 .sub-card.archived{opacity:.75}
 .op.arch{color:#8E8E93}
 .op.arch:hover{color:#fff}
+/* ===== v7.2 转账到账差额（红包 / 优惠抵扣、到账扣费） ===== */
+.recv-diff{font-size:12px;line-height:1.45;margin-top:6px;min-height:0}
+.recv-diff.up{color:var(--up)}
+.recv-diff.down{color:var(--down)}
