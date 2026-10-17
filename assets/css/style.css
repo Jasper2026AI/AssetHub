@@ -1244,3 +1244,8 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
 .dfix-note>svg{width:16px;height:16px;flex:none;color:#FF9000}
 .dfix-note span{flex:1}
 .dfix-note .btn{flex:none}
+/* ===== v7.4 更新市值补记日期 ===== */
+.pd-date{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:13px;color:var(--text-2,rgba(255,255,255,.7))}
+.pd-date span{flex:none}
+.pd-date .input{flex:1;min-width:0}
+#pd-date-hint{color:#FFB04D}

@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -962,6 +962,47 @@
     const today = DB.snaps[tk], o = today && today[bal ? 'bo' : 'po'];
     if (o && o[a.id] != null) return o[a.id];
     return bal ? +a.qty || 0 : +a.price || 0;
+  }
+  /** 补记更新市值：把这次变化记到过去的某一天 D。D 当天记录这笔变化（日盈亏 / 走势），之后每天的记录整体平移同样的差额，
+      今天的“今日盈亏”起点也随之平移（今天不再重复计入）。old = 更新前的 { qty, price } */
+  function backdateVal(a, old, D) {
+    const tk = todayKey(); if (!D || D >= tk) return;
+    const bal = isBalance(a), f = bal ? 'b' : 'p', ccy = aCcy(a);
+    const du = bal ? (+a.qty || 0) - (+old.qty || 0) : (+a.price || 0) - (+old.price || 0);       // 单价 / 余额的变化
+    const q = bal ? 1 : +a.qty || 0;
+    const vOld = bal ? +old.qty || 0 : (+old.qty || 0) * (+old.price || 0);
+    const dUSD = conv((bal ? +a.qty || 0 : q * (+a.price || 0)) - vOld, ccy, 'USD');
+    if (Math.abs(du) < 1e-12 && Math.abs(dUSD) < 1e-9) return;
+    const unitOld = bal ? +old.qty || 0 : +old.price || 0;
+    if (!DB.snaps[D]) {   // 那天没打开过：照前一天（没有就照今天）补一条记录
+      const ks = snapKeys(), pk = ks.filter(k => k < D).pop(), base = DB.snaps[pk || tk] || {};
+      const c = base.c != null ? base.c : netUSD() - dUSD;
+      DB.snaps[D] = { o: c, h: c, l: c, c, p: Object.assign({}, base.p), b: Object.assign({}, base.b) };
+    }
+    const r2 = x => Math.round(x * 100) / 100;
+    snapKeys().forEach(k => {
+      if (k < D) return;
+      const sn = DB.snaps[k];
+      if (k < tk) {
+        const uK = sn[f] && sn[f][a.id] != null ? +sn[f][a.id] : unitOld;   // 那天原来记录的单价 / 余额
+        if (sn[f] || k === D) { sn[f] = sn[f] || {}; sn[f][a.id] = round8(uK + du); }
+        sn.c += dUSD; sn.h = Math.max(sn.h, sn.c); sn.l = Math.min(sn.l, sn.c);
+        if (k > D) sn.o += dUSD;
+        if (!bal && sn.tp) sn.tp = [r2(sn.tp[0] + dUSD), sn.tp[1]];
+        if (k === D && sn.d) {
+          const v0 = sn.d[a.id] || [0, 0, null];
+          const baseV = v0[2] != null ? +v0[2] : r2(conv(bal ? uK : q * uK, ccy, 'USD') - v0[0]);   // 当天开始时的市值 = 当天原收盘市值 − 原当天盈亏
+          const ch = r2(+v0[0] + dUSD);
+          sn.d[a.id] = [ch, baseV ? Math.round((ch / Math.abs(baseV)) * 10000) / 100 : 0, baseV];
+        }
+        sn.dt = Date.now();
+      } else {   // 今天：开盘 = 昨天收盘，今日起点同步平移
+        sn.o += dUSD; sn.h = Math.max(sn.h, sn.o); sn.l = Math.min(sn.l, sn.o);
+        const of = bal ? 'bo' : 'po';
+        if (sn[of] && sn[of][a.id] != null) sn[of][a.id] = round8(+sn[of][a.id] + du);
+      }
+    });
+    if (a.dayBase && a.dayBase.d === tk) a.dayBase.v = round8(+a.dayBase.v + du);
   }
   /** 把这项资产“今日盈亏”的起点设为当前值（录错后修正用）；当天新录入的资产连同录入起点一起改 */
   function rebaseDay(a) {
@@ -3238,13 +3279,18 @@
     return new Promise(res => {
       const root = $('#dialog-root');
       root.innerHTML = `<div class="modal-backdrop"></div><form class="alert pass" autocomplete="off"><h4>${o.icon ? ic(o.icon) : ''} ${o.title}</h4><p>${o.msg || ''}</p>
-        <div class="pass-fields"><input class="input num" name="v" inputmode="decimal" value="${esc(o.value || '')}" placeholder="${esc(o.placeholder || '')}">${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>
+        <div class="pass-fields"><input class="input num" name="v" inputmode="decimal" value="${esc(o.value || '')}" placeholder="${esc(o.placeholder || '')}">${o.hint ? `<div class="hint">${o.hint}</div>` : ''}${o.date ? `<label class="pd-date"><span>${t('updDate')}</span><input class="input" type="date" name="d" value="${esc(o.date)}" max="${esc(o.date)}" min="${esc(o.dateMin || '')}"></label><div class="hint" id="pd-date-hint"></div>` : ''}</div>
         <div class="alert-btns"><button type="button" data-r="0">${t('cancel')}</button><button type="submit" class="ok">${t('save')}</button></div></form>`;
       root.classList.add('open');
       const form = $('form', root), inp = form.elements.v;
       setTimeout(() => { inp.focus(); inp.select(); }, 50);
       const done = v => { root.classList.remove('open'); root.innerHTML = ''; res(v); };
-      form.addEventListener('submit', e => { e.preventDefault(); done(inp.value); });
+      if (o.date) {
+        const di = form.elements.d, dh = $('#pd-date-hint', form);
+        const upd = () => { dh.textContent = di.value && di.value < o.date ? t('updDateHint', { d: di.value }) : ''; };
+        di.addEventListener('input', upd); upd();
+      }
+      form.addEventListener('submit', e => { e.preventDefault(); done(o.date ? { v: inp.value, d: form.elements.d.value || o.date } : inp.value); });
       $('[data-r="0"]', form).addEventListener('click', () => done(null));
     });
   }
@@ -3993,6 +4039,7 @@
     if (e.extra) {
       if (e.extra.tx) extra += `<div class="lg-d dim">${t('viaTx')}: ${esc(e.extra.tx)}</div>`;
       if (e.extra.from != null) extra += `<div class="lg-d">${t('fld_value')}: ${money(e.extra.from, { ccy: e.extra.ccy, max: 8 })} <i>→</i> ${money(e.extra.to, { ccy: e.extra.ccy, max: 8 })}</div>`;
+      if (e.extra.at) extra += `<div class="lg-d dim">${t('updAtLog', { d: e.extra.at })}</div>`;
       if (e.extra.value != null && e.act === 'delete') extra += `<div class="lg-d dim">${t('fld_value')}: ${money(e.extra.value, { ccy: e.extra.ccy, max: 8 })}</div>`;
       if (e.extra.file) extra += `<div class="lg-d dim">${esc(e.extra.file)}</div>`;
     }
@@ -4620,10 +4667,12 @@
         icon: 'refresh', title: `${bal ? t('updBal') : t('updVal')} · ${esc(a.name)}`,
         msg: t(bal ? 'updBalMsg' : 'updValMsg', { c: ccy }),
         value: trim8(cur), placeholder: '0.00',
-        hint: bal ? '' : t('updValHint', { cost: money(aCost(a), { ccy, raw: true }) })
+        hint: bal ? '' : t('updValHint', { cost: money(aCost(a), { ccy, raw: true }) }),
+        date: todayKey(), dateMin: [addDate(todayKey(), -59, 'day'), ymd(new Date(a.createdAt || 0))].sort().pop()
       });
       if (raw == null) return;
-      let v = parseNum(raw);
+      const at = raw.d && raw.d < todayKey() ? raw.d : '';
+      let v = parseNum(raw.v);
       if (isNaN(v) || (!bal && v < 0)) { toast(t('errAmount'), 'err'); return; }
       const before = { qty: a.qty, price: a.price, cost: a.cost };
       if (bal) { if (hasTag(a, 'liability') && v > 0) v = -v; a.qty = v; }
@@ -4634,7 +4683,8 @@
         a.updatedAt = Date.now();
       }
       const d = diffOf(before, a, ['qty', 'price', 'cost']);
-      if (d.length) logOp('asset', a, bal ? 'updBal' : 'updVal', d, { from: cur, to: aVal(a), ccy });
+      if (at) backdateVal(a, before, at);
+      if (d.length) logOp('asset', a, bal ? 'updBal' : 'updVal', d, Object.assign({ from: cur, to: aVal(a), ccy }, at ? { at } : {}));
       commit(); renderAll();
       const diff = aVal(a) - cur;
       toast(`${t('saved')} · ${money(aVal(a), { ccy, raw: true })} (${money(diff, { ccy, sign: true, raw: true })})`, 'ok');

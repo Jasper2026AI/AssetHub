@@ -222,9 +222,12 @@
   /* ---------------- 黄金 ----------------
      goldapi：gold-api.com 国际现货金价，可直接按 CNY / USD / HKD 等币种报价（每金衡盎司），免费、无需 Key
      paxg   ：Binance PAXG/USDT（1 PAXG = 1 盎司），USD 报价，再按汇率换算
+     sge9999 / sgetd：东方财富 · 上海黄金交易所 Au9999 / Au(T+D)（人民币 / 克，带昨收），免费、无需 Key；失败时退回 gold-api
      今日涨跌的起点：goldapi 没有开盘价，借用 PAXG 的“今开 / 现价”比例推算 */
   const GOLD_SOURCES = {
     goldapi: { name: 'gold-api.com（现货金价，支持 CNY 直接报价）' },
+    sge9999: { name: '上海金 Au9999（东方财富，人民币 / 克）' },
+    sgetd: { name: '上海金 Au(T+D)（东方财富，人民币 / 克）' },
     paxg: { name: 'Binance PAXG/USDT（USD，按汇率换算）' }
   };
   const GOLD_CCYS = ['USD', 'CNY', 'HKD', 'TWD', 'EUR', 'GBP', 'JPY', 'SGD', 'AUD', 'CAD', 'CHF', 'KRW', 'MYR', 'THB'];
@@ -234,12 +237,44 @@
     if (!(+j.price > 0)) throw new Error('No data');
     return { price: +j.price, ccy: (j.currency || c).toUpperCase() };
   }
+  /** JSONP（接口不允许网页直接跨域读取时用）：加载 <script>，回调里拿数据 */
+  function jsonp(url, timeout) {
+    return new Promise((resolve, reject) => {
+      const cb = '__ah_cb' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const el = document.createElement('script');
+      const done = () => { clearTimeout(tm); delete window[cb]; el.remove(); };
+      const tm = setTimeout(() => { done(); reject(new Error('Timeout')); }, timeout || 10000);
+      window[cb] = j => { done(); resolve(j); };
+      el.onerror = () => { done(); reject(new Error('Network')); };
+      el.referrerPolicy = 'no-referrer';
+      el.src = url + (url.includes('?') ? '&' : '?') + 'cb=' + cb;
+      document.head.appendChild(el);
+    });
+  }
+  /** 东方财富 · 上海黄金交易所行情：{ price, prev }（人民币 / 克）。先直接读取，被跨域限制时改用 JSONP */
+  async function sgeQuote(code) {
+    const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=118.${code}&fields=f43,f57,f58,f59,f60&fltt=2&invt=2&ut=fa5fd1943c7b386f172d6893dbfba10b`;
+    let j;
+    try { j = await fetchJSON(url, { timeout: 8000 }); } catch (e) { j = await jsonp(url, 10000); }
+    const d = j && j.data;
+    if (!d) throw new Error('No data');
+    const sc = v => { let x = +v; if (!(x > 0)) return 0; if (x > 20000 && d.f59 > 0) x /= Math.pow(10, +d.f59); return x; };   // 万一没按小数返回：按 f59（小数位）还原
+    const price = sc(d.f43), prev = sc(d.f60);
+    if (!(price > 0)) throw new Error('No data');
+    return { price, prev };
+  }
   /** 黄金每盎司报价：{ price, prev, ccy } */
   async function goldQuote(ccy, S) {
     const src = (S && S.goldSrc) || 'goldapi';
+    if (src === 'sge9999' || src === 'sgetd') {
+      try {
+        const g = await sgeQuote(src === 'sgetd' ? 'AUTD' : 'AU9999');
+        return { price: g.price * OZ_G, prev: g.prev * OZ_G, ccy: 'CNY', src };   // 统一成每盎司，资产按 g / kg / oz 再换算
+      } catch (e) { /* 东方财富不可用：退回国际现货金价 */ }
+    }
     let paxg = null;
     try { paxg = await cryptoQuote('PAXG', S && S.cryptoSrc); } catch (e) { /* PAXG 不可用时没有今开 */ }
-    if (src === 'goldapi') {
+    if (src !== 'paxg') {
       try {
         const g = await goldApiQuote(ccy);
         const ratio = paxg && paxg.price > 0 && paxg.prev > 0 ? paxg.prev / paxg.price : 0;
