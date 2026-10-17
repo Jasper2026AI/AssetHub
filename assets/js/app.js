@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -294,6 +294,7 @@
     DB.audit = merged.slice(-2000);
     S().snapsGist = S().gistId;
     pruneSnaps();
+    if (S().dfix && S().dfix !== 'restored') fixDayRecords(false);   // 云端拉下来的旧记录也按新口径修正
     S().syncedStamp = c.meta.updatedAt || 0;
   }
   /** 合并行情 API Key（每次同步都做，和资产数据谁新谁旧无关）：
@@ -891,11 +892,66 @@
     if (a.prevClose > 0) return a.prevClose;
     return +a.price || 0;
   }
+  /** 某天之前最近一次（7 天内）记录的单价；没有返回 null */
+  function prevSnapPrice(a, keys, k) {
+    const lim = addDate(k, -7, 'day');
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const kk = keys[i];
+      if (kk >= k) continue;
+      if (kk < lim) break;
+      const m = DB.snaps[kk].p;
+      if (m && m[a.id] != null) return m[a.id];
+    }
+    return null;
+  }
+  /** v7.3 修正历史“每日盈亏”记录：股票 / 黄金按“上一次记录的价格”重算（休市日 = 0）。
+      d[id] = [盈亏, 涨跌%, 起点市值]（USD）；起点市值 + 盈亏 = 当天市值，按价格比例拆分，不需要当时的数量 / 汇率。可重复执行，结果不变 */
+  const isStaleKind = a => a.source === 'online' && ['stock', 'gold'].includes(Api.quoteKind(a));
+  function fixDayRecords(backup) {
+    const keys = snapKeys(), tk = todayKey(), bak = {};
+    let days = 0;
+    keys.forEach(k => {
+      const sn = DB.snaps[k];
+      if (k >= tk || !sn.d || !sn.p) return;
+      let changed = false;
+      DB.assets.forEach(a => {
+        const v = sn.d[a.id]; if (!v || !isStaleKind(a)) return;
+        const pk = sn.p[a.id], pp = prevSnapPrice(a, keys, k);
+        if (!(pk > 0) || pp == null) return;
+        const base0 = v[2] != null ? +v[2] : v[1] ? v[0] / (v[1] / 100) : null;
+        if (base0 == null) return;
+        const mv = base0 + v[0];                       // 当天市值（USD）
+        const ch = Math.round(mv * (1 - pp / pk) * 100) / 100, base = Math.round(mv * (pp / pk) * 100) / 100;
+        if (Math.abs(ch - v[0]) < 0.006) return;
+        if (backup) (bak[k] = bak[k] || {})[a.id] = v.slice();
+        sn.d[a.id] = [ch, base ? Math.round((ch / Math.abs(base)) * 10000) / 100 : 0, base];
+        changed = true;
+      });
+      if (changed) { sn.dt = Date.now(); days++; }
+    });
+    if (backup && days) { try { localStorage.setItem('assethub.dfix.bak', JSON.stringify({ at: Date.now(), d: bak })); } catch (e) { /* 存不下就算了 */ } }
+    return days;
+  }
+  function restoreDayRecords() {
+    let b; try { b = JSON.parse(localStorage.getItem('assethub.dfix.bak') || 'null'); } catch (e) { b = null; }
+    if (!b || !b.d) return 0;
+    let n = 0;
+    Object.keys(b.d).forEach(k => { const sn = DB.snaps[k]; if (!sn || !sn.d) return; Object.assign(sn.d, b.d[k]); sn.dt = Date.now(); n++; });
+    S().dfix = 'restored'; save();
+    return n;
+  }
   /** “今日变化”的起点：在线行情的昨收 / 今开 → 昨天最后一次记录 → 今天第一次记录 → 当前值 */
   function dayRef(a, keys) {
     const tk = todayKey(), bal = isBalance(a);
     if (a.dayBase && a.dayBase.d === tk) return +a.dayBase.v;           // 手动“清零今日盈亏”后的起点
-    if (!bal && a.prevClose > 0 && a.prevDay === tk) return a.prevClose;
+    if (!bal && a.prevClose > 0 && a.prevDay === tk) {
+      // 加密货币 24 小时交易：用接口给的起点。股票 / 黄金等：用“上一次记录的价格”做起点——
+      // 休市（周末 / 节假日）时价格不变，当天盈亏就是 0，不会把上一个交易日的涨跌再算一遍
+      const kind = Api.quoteKind(a);
+      if (kind === 'crypto' || !kind) return a.prevClose;
+      const ps = prevSnapPrice(a, keys, tk);
+      return ps != null ? ps : a.prevClose;
+    }
     const f = bal ? 'b' : 'p';
     for (let i = keys.length - 1; i >= 0; i--) {
       const k = keys[i];
@@ -1437,7 +1493,7 @@
     h.rows.forEach(x => { if (pick(x.a)) { pnl += x.ch; base += x.base || 0; } });
     return { pnl, pct: base ? (pnl / Math.abs(base)) * 100 : 0, est: h.est };
   }
-  /** 某个月 / 某一年的投资盈亏：期内每天都有记录就把每日记录相加；否则按期初、期末快照价 × 当前数量估算（与实时卡片同一口径） */
+  /** 某个月 / 某一年的投资盈亏：按期初、期末快照价 × 当前数量计算（与实时卡片同一口径） */
   function invPeriod(start, end) {
     const tk = todayKey(), keys = snapKeys(), inP = keys.filter(k => k >= start && k <= end && k < tk);
     if (end >= tk) return null;
@@ -1451,13 +1507,9 @@
       const ref = refPrice(a, start, keys), q = +a.qty || 0;
       pnl += conv(q * (pe - ref), aCcy(a)); base += conv(q * ref, aCcy(a)); n++;
     });
-    const rec = inP.length && inP.every(k => DB.snaps[k].d);
-    if (rec) {
-      let s2 = 0; inP.forEach(k => DB.assets.forEach(a => { const v = DB.snaps[k].d[a.id]; if (v && isInv(a)) s2 += conv(v[0], 'USD'); }));
-      return { pnl: s2, pct: base ? (s2 / Math.abs(base)) * 100 : 0, est: false };
-    }
+    // v7.3：统一按“期初价格 → 期末价格”计算（和本月 / 本年卡片同一口径），不再把每天的记录相加，避免休市日重复
     if (!n) return null;
-    return { pnl, pct: base ? (pnl / Math.abs(base)) * 100 : 0, est: true };
+    return { pnl, pct: base ? (pnl / Math.abs(base)) * 100 : 0, est: false };
   }
   const monthEnd = m => { const [y, mo] = m.split('-').map(Number); return `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`; };
   const invMonth = m => (m === todayKey().slice(0, 7) ? Object.assign(periodPnl('month'), { est: false }) : invPeriod(m + '-01', monthEnd(m)));
@@ -3003,6 +3055,12 @@
           <p class="set-desc">${t('pwaSub')}</p>${body}</div>`;
   }
 
+  function dfixNoteHTML() {
+    let b; try { b = JSON.parse(localStorage.getItem('assethub.dfix.bak') || 'null'); } catch (e) { b = null; }
+    if (!b || !b.d) return '';
+    const n = Object.keys(b.d).length, restored = S().dfix === 'restored';
+    return `<div class="dfix-note">${ic('cal')}<span>${restored ? t('dfixRestored', { n }) : t('dfixNote', { n, d: fullTime(b.at) })}</span>${restored ? '' : `<button class="btn btn-glass sm" data-action="dfix-restore">${t('dfixRestore')}</button>`}</div>`;
+  }
   function renderSettings() {
     const s = S();
     const size = (new Blob([JSON.stringify(DB)]).size / 1024).toFixed(1);
@@ -3032,6 +3090,7 @@
             <button class="btn btn-glass" data-action="recover">${ic('clock')}${t('recoverT')}</button>
             <button class="btn btn-danger" data-action="clear">${ic('trash')}${t('clearAll')}</button>
           </div>
+          ${dfixNoteHTML()}
         </div>
         <div class="card glass">
           <div class="card-head"><div class="card-title"><span class="ico">${ic('shield')}</span>${t('setSecT')}</div>
@@ -4356,6 +4415,10 @@
     'sub-info'(el) { const s = findSub(el.dataset.id); if (s) openSubInfo(el, s, el.dataset.k); },
     'sub-cat'(el) { UI.sub.cat = UI.sub.cat === el.dataset.v && el.classList.contains('legend-row') ? 'all' : el.dataset.v; renderSubs(); },
     'sub-pmode'(el) { UI.sub.pmode = el.dataset.v; renderSubs(); },
+    async 'dfix-restore'() {
+      if (!(await confirmDialog({ title: t('dfixRestoreT'), msg: t('dfixRestoreM'), ok: t('dfixRestore'), danger: false }))) return;
+      const n = restoreDayRecords(); commit(); renderAll(); toast(t('dfixRestoredT', { n }), 'ok');
+    },
     'sub-view'() { UI.sub.view = UI.sub.view === 'archived' ? 'active' : 'archived'; UI.sub.cat = 'all'; UI.sub.sel.clear(); renderSubs(); },
     'sub-archive'(el) { const s = findSub(el.dataset.id); if (s) setArchived([s], true); },
     'sub-unarchive'(el) { const s = findSub(el.dataset.id); if (s) setArchived([s], false); },
@@ -4702,6 +4765,8 @@
   /* ============ 启动 ============ */
   const demoNow = autoDemo();
   pruneSnaps();
+  if (!S().dfix) { const n = fixDayRecords(true); S().dfix = n ? 'v73' : 'none'; save(); if (n) setTimeout(() => toast(t('dfixDone', { n })), 1500); }
+  else if (S().dfix !== 'restored') { if (fixDayRecords(false)) save(); }
   renderAll();
   if (demoNow) setTimeout(() => toast(t('demoAuto')), 600);
   // 升级前就填过行情 Key 的设备：标记一次，让 Key 同步到其他设备

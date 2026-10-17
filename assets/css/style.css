@@ -1234,3 +1234,13 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
 .recv-diff{font-size:12px;line-height:1.45;margin-top:6px;min-height:0}
 .recv-diff.up{color:var(--up)}
 .recv-diff.down{color:var(--down)}
+/* ===== v7.3 每日盈亏修正说明 ===== */
+.dfix-note{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:12.5px;line-height:1.5;color:var(--text-2,rgba(255,255,255,.7))}
+.dfix-note>svg{width:16px;height:16px;flex:none;color:#FF9000}
+.dfix-note span{flex:1}
+.dfix-note .btn{flex:none}
+/* ===== v7.3 每日盈亏修正说明 ===== */
+.dfix-note{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:12.5px;line-height:1.5;color:var(--text-2,rgba(255,255,255,.7))}
+.dfix-note>svg{width:16px;height:16px;flex:none;color:#FF9000}
+.dfix-note span{flex:1}
+.dfix-note .btn{flex:none}
