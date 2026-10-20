@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -993,7 +993,8 @@
       if (!pv) return a.prevClose;
       // v7.6：接口给的是交易所真实昨收（股票 / 上海金）时，用“昨收有没有变”判断是不是新的一场交易：
       //   昨收变了 → 新的一场：今日盈亏 = 现价 − 昨收（和券商一致）；没变 → 同一场：只算上次记录之后的变动（休市 = 0，不重复）
-      if (a.realPrev && pv.pc != null && a.prevRaw > 0 && Math.abs(pv.pc - a.prevRaw) > 1e-9 * Math.max(1, a.prevRaw)) return a.prevClose;
+      //   上一次的记录里没有昨收（升级前的记录 / 那天没取到行情）：直接按交易所昨收算，和券商一致
+      if (a.realPrev && a.prevRaw > 0 && (pv.pc == null || Math.abs(pv.pc - a.prevRaw) > 1e-9 * Math.max(1, a.prevRaw))) return a.prevClose;
       return pv.p;
     }
     const f = bal ? 'b' : 'p';
