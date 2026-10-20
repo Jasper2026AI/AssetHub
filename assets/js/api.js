@@ -168,6 +168,10 @@
     const order = [S.stockSrc].concat(Object.keys(STOCK_SOURCES).filter(k => k !== S.stockSrc))
       .filter(k => STOCK_SOURCES[k] && S[STOCK_SOURCES[k].keyField]);
     if (!order.length) throw new Error('NO_KEY');
+    // 美股常规交易时段以外（盘前 / 盘后 / 周末）：市值按常规交易的收盘价算（和券商市值一致），不用盘前盘后成交价
+    if (isUSCode(code) && !usRegularOpen()) {
+      try { const v = await emUSQuote(code); return Object.assign(v, { ccy: 'USD', regClose: true }); } catch (e) { /* 东方财富取不到：照常用所选行情源 */ }
+    }
     let err;
     for (const k of order) {
       try {
@@ -177,6 +181,43 @@
       } catch (e) { err = e; }
     }
     throw err || new Error('No data');
+  }
+
+  /** 美股是否在常规交易时段：美东时间 周一至周五 9:30–16:00（节假日休市时各家接口返回的本来就是收盘价） */
+  function usRegularOpen(now) {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(now || new Date());
+    const g = t => (parts.find(x => x.type === t) || {}).value;
+    const wd = g('weekday'), mins = (+g('hour') % 24) * 60 + +g('minute');
+    if (wd === 'Sat' || wd === 'Sun') return false;
+    return mins >= 570 && mins < 960;
+  }
+  const isUSCode = c => /^[A-Z][A-Z0-9]{0,5}(\.US)?$/.test(c) || /^[A-Z]{1,5}\.[AB]$/.test(c);   // AAPL / AAPL.US / BRK.B 这类 A、B 股
+  /** 东方财富 push2 行情（免费、无需 Key）：先直接读取，被跨域限制时改用 JSONP */
+  async function emGet(secid, fields) {
+    const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=${fields}&fltt=2&invt=2&ut=fa5fd1943c7b386f172d6893dbfba10b`;
+    let j;
+    try { j = await fetchJSON(url, { timeout: 8000 }); } catch (e) { j = await jsonp(url, 10000); }
+    return j && j.data;
+  }
+  /** 美股常规交易收盘价（东方财富，不含盘前盘后）：{ price, prev }。交易所代码 105 纳斯达克 / 106 纽交所 / 107 美交所，找到后记住 */
+  const EM_US_MKT = {};
+  let emDownUntil = 0;
+  async function emUSQuote(code) {
+    if (Date.now() < emDownUntil) throw new Error('EM_DOWN');
+    const sym = code.replace(/\.US$/, '').replace(/\.([AB])$/, '_$1');   // 东方财富的 A / B 股写成 BRK_B
+    let netErr = 0;
+    let mk = EM_US_MKT[sym];
+    if (!mk) { try { mk = JSON.parse(localStorage.getItem('assethub.emus') || '{}')[sym]; } catch (e) { /* 没有缓存 */ } }
+    for (const m of (mk ? [mk] : []).concat(['105', '106', '107'].filter(x => x !== mk))) {
+      const d = await emGet(`${m}.${sym}`, 'f43,f57,f59,f60,f86').catch(() => { netErr++; return null; });
+      if (d && +d.f43 > 0) {
+        EM_US_MKT[sym] = m;
+        try { const c = JSON.parse(localStorage.getItem('assethub.emus') || '{}'); if (c[sym] !== m) { c[sym] = m; localStorage.setItem('assethub.emus', JSON.stringify(c)); } } catch (e) { /* 存不下就算了 */ }
+        return { price: +d.f43, prev: +d.f60 || 0 };
+      }
+    }
+    if (netErr >= 3) emDownUntil = Date.now() + 10 * 60000;   // 东方财富连不上：10 分钟内不再尝试，直接用所选行情源
+    throw new Error('No data');
   }
 
   /* ---------------- 黄金 ---------------- */
