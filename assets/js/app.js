@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -279,27 +279,29 @@
       返回 { changed: 本机有变化, needPush: 本机有云端没有 / 比云端新的过去记录 } */
   function mergeSnaps(cs) {
     cs = cs || {};
-    const tk = todayKey(), num = v => typeof v === 'number' && isFinite(v);
+    const tk = todayKey(), num = v => typeof v === 'number' && isFinite(v), since = DB.meta.since || '';
+    const sig0 = JSON.stringify(DB.snaps);
     let changed = false, needPush = false;
     Object.keys(cs).forEach(k => {
       const c = cs[k], l = DB.snaps[k];
-      if (!c) return;
+      if (!c || (since && k < since)) return;   // 新建账本之前的记录不属于这个账本
       if (!l) { DB.snaps[k] = JSON.parse(JSON.stringify(c)); changed = true; return; }
       const hi = Math.max(num(l.h) ? l.h : -Infinity, num(c.h) ? c.h : -Infinity), lo = Math.min(num(l.l) ? l.l : Infinity, num(c.l) ? c.l : Infinity);
       if ((c.dt || 0) > (l.dt || 0)) {
         const m = JSON.parse(JSON.stringify(c));
-        ['p', 'b', 'd', 'tp'].forEach(f => { if (m[f] == null && l[f] != null) m[f] = l[f]; });
+        ['p', 'b', 'd', 'tp', 'pc'].forEach(f => { if (m[f] == null && l[f] != null) m[f] = l[f]; });
         if (k === tk) { m.po = Object.assign({}, c.po, l.po); m.bo = Object.assign({}, c.bo, l.bo); }
         if (isFinite(hi)) m.h = hi; if (isFinite(lo)) m.l = lo;
         DB.snaps[k] = m; changed = true;
       } else {
         if (isFinite(hi) && hi !== l.h) { l.h = hi; changed = true; }
         if (isFinite(lo) && lo !== l.l) { l.l = lo; changed = true; }
-        ['p', 'b', 'd', 'tp'].forEach(f => { if (l[f] == null && c[f] != null) { l[f] = JSON.parse(JSON.stringify(c[f])); changed = true; } });
+        ['p', 'b', 'd', 'tp', 'pc'].forEach(f => { if (l[f] == null && c[f] != null) { l[f] = JSON.parse(JSON.stringify(c[f])); changed = true; } });
         if (k < tk && (l.dt || 0) > (c.dt || 0)) needPush = true;
       }
     });
     Object.keys(DB.snaps).forEach(k => { if (k < tk && !cs[k]) needPush = true; });
+    if (changed) { pruneSnaps(); changed = JSON.stringify(DB.snaps) !== sig0; }   // 合并进来又会被清理掉的明细不算变化，避免每次同步都重绘
     return { changed, needPush };
   }
   /** 把云端的数据套用到本机：只替换资产、记账、账本信息，设备自己的设置（布局、配色、密码等）保持不变 */
@@ -854,7 +856,7 @@
     // 账本第一天（新建账本 / 清理走势后的起始日）：开 = 高 = 低 = 收 = 当前总资产，不沿用之前（旧账本）的数值
     if (DB.meta.since && k <= DB.meta.since) { s.o = s.h = s.l = net; }
     // p / b：当日最新的单价 / 余额；po / bo：当日第一次看到的单价 / 余额（作为“今日变化”的起点）
-    s.p = {}; s.b = {}; s.po = s.po || {}; s.bo = s.bo || {};
+    s.p = {}; s.b = {}; s.pc = {}; s.po = s.po || {}; s.bo = s.bo || {};
     DB.assets.forEach(a => {
       if (isBalance(a)) {
         s.b[a.id] = +a.qty || 0;
@@ -864,6 +866,7 @@
       }
       s.p[a.id] = +a.price || 0;
       if (s.po[a.id] == null) s.po[a.id] = +a.price || 0;
+      if (a.realPrev && a.prevRaw > 0 && a.prevDay === k) (s.pc = s.pc || {})[a.id] = a.prevRaw;   // 这天看到的接口昨收
       if (!a.addPrice && a.price > 0) a.addPrice = +a.price;
     });
     // d：当天每项资产的日盈亏 [USD, 涨跌%]，用于“资产日盈亏”按日期查看历史排行
@@ -893,7 +896,7 @@
       const next = keys[i + 1];
       const monthEnd = !next || next.slice(0, 7) !== k.slice(0, 7);
       const sn = DB.snaps[k];
-      if (k < cut && !monthEnd) { delete sn.p; delete sn.b; }
+      if (k < cut && !monthEnd) { delete sn.p; delete sn.b; delete sn.pc; }
       if (k < todayKey()) { delete sn.po; delete sn.bo; }
       if (k < dCut) { delete sn.d; delete sn.tp; }
     });
@@ -916,6 +919,18 @@
     }
     if (a.prevClose > 0) return a.prevClose;
     return +a.price || 0;
+  }
+  /** 某天之前最近一次（7 天内）的记录：{ p: 单价, pc: 那次看到的接口昨收（没有为 undefined） } */
+  function prevSnap(a, keys, k) {
+    const lim = addDate(k, -7, 'day');
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const kk = keys[i];
+      if (kk >= k) continue;
+      if (kk < lim) break;
+      const sn = DB.snaps[kk], m = sn.p;
+      if (m && m[a.id] != null) return { p: m[a.id], pc: sn.pc ? sn.pc[a.id] : undefined };
+    }
+    return null;
   }
   /** 某天之前最近一次（7 天内）记录的单价；没有返回 null */
   function prevSnapPrice(a, keys, k) {
@@ -974,8 +989,12 @@
       // 休市（周末 / 节假日）时价格不变，当天盈亏就是 0，不会把上一个交易日的涨跌再算一遍
       const kind = Api.quoteKind(a);
       if (kind === 'crypto' || !kind) return a.prevClose;
-      const ps = prevSnapPrice(a, keys, tk);
-      return ps != null ? ps : a.prevClose;
+      const pv = prevSnap(a, keys, tk);
+      if (!pv) return a.prevClose;
+      // v7.6：接口给的是交易所真实昨收（股票 / 上海金）时，用“昨收有没有变”判断是不是新的一场交易：
+      //   昨收变了 → 新的一场：今日盈亏 = 现价 − 昨收（和券商一致）；没变 → 同一场：只算上次记录之后的变动（休市 = 0，不重复）
+      if (a.realPrev && pv.pc != null && a.prevRaw > 0 && Math.abs(pv.pc - a.prevRaw) > 1e-9 * Math.max(1, a.prevRaw)) return a.prevClose;
+      return pv.p;
     }
     const f = bal ? 'b' : 'p';
     for (let i = keys.length - 1; i >= 0; i--) {
@@ -2247,7 +2266,7 @@
 
   /* ================= 页面：订阅明细 =================
      订阅只记录会员 / 订阅类支出：不计入总资产，也不参与投资盈亏。
-     每个订阅的扣费 = 关联到它的记账支出（tx.subId）+ 第一笔关联支出之前，按开始时间和周期推算的账单 */
+     每个订阅的扣费 = 关联到它的记账支出（tx.subId）+ 其余各期按开始时间和周期推算的账单（有记账付款的那期不再推算） */
   const SUB_CATS = ['vps', 'ai', 'domain', 'media', 'software', 'cloud'];
   const SUB_CAT_COLOR = { vps: '#0A84FF', ai: '#BF5AF2', domain: '#30D158', media: '#FF375F', software: '#64D2FF', cloud: '#FF9F0A', '': '#8E8E93' };
   const SUB_EXTRA_COLORS = ['#FFD60A', '#FF6B3D', '#5E5CE6', '#66D4CF', '#AC8E68', '#FF6482', '#32ADE6'];
@@ -2423,11 +2442,16 @@
   /** 一个订阅的全部扣费（显示币种） */
   function subPays(s, all) {
     const real = DB.txs.filter(x => x.subId === s.id && x.type === 'expense').map(x => ({ date: x.date, v: conv(+x.amount || 0, x.ccy), amt: +x.amount || 0, ccy: x.ccy, real: true, id: x.id }));
-    const first = real.reduce((m, x) => (!m || x.date < m ? x.date : m), '');
     const est = [], tk = todayKey();
     const b0 = s.start ? billStart(s) : '';
+    // v7.6：从开始到今天（或到期日）的每一期都计入；某一期在扣费日前后半个周期内有关联的记账付款，就用实际付款代替这期推算（不重复计算）
+    const cs = cycleSpec(s), cyDays = !cs ? 36500 : cs[1] === 'year' ? 365 * cs[0] : cs[1] === 'month' ? 30.44 * cs[0] : cs[0];
+    const win = Math.max(3, cyDays / 2), dn = k => Math.round(new Date(k + 'T00:00:00').getTime() / 864e5), used = new Set();
     let d = b0, n = 0;
-    while (d && d <= tk && (!first || d < first) && (!s.expire || d < s.expire) && n < 3000) {
+    while (d && d <= tk && (!s.expire || d < s.expire) && n < 3000) {
+      let best = -1, bd = Infinity;
+      real.forEach((r, i) => { if (used.has(i)) return; const g = Math.abs(dn(r.date) - dn(d)); if (g <= win && g < bd) { bd = g; best = i; } });
+      if (best >= 0) { used.add(best); if (s.cycle === 'once') break; d = cycleAt(b0, s, ++n); continue; }
       // 单期调整：折扣（自定义金额）/ 免费（0）/ 跳过（这期没扣费，不计入）
       const base = priceAt(s, d), a = s.adj && s.adj[d];
       const amt = a ? (a.t === 'free' || a.t === 'skip' ? 0 : +a.amt || 0) : base;
@@ -2444,6 +2468,7 @@
   function subState(s) {
     const tk = todayKey();
     if (s.cycle === 'once') return 'forever';
+    if (s.expire && daysTo(s.expire) < 0) return 'expired';   // 已过到期日：不管是否还在试用期，都算已过期
     if (+s.trialDays > 0 && s.start && tk >= s.start && tk < billStart(s)) return 'trial';
     if (!s.expire) return 'forever';
     const d = daysTo(s.expire);
@@ -2669,7 +2694,8 @@
     // 账号 / 网站：只显示图标，点开才显示内容
     const infoBtn = (s, k) => (s[k] ? `<button class="info-ic" data-action="sub-info" data-k="${k}" data-id="${s.id}" title="${t(k === 'account' ? 'subAccountShow' : 'subSiteShow')}">${ic(k === 'account' ? 'user' : 'globe')}</button>` : '<span class="dim">—</span>');
     let body;
-    if (!subsInView().length && DB.subs.length) body = `<div class="card glass"><div class="empty"><div class="em">🗄️</div><h4>${t('subArchEmpty')}</h4></div></div>`;
+    if (!subsInView().length && DB.subs.length) body = U.view === 'archived' ? `<div class="card glass"><div class="empty"><div class="em">🗄️</div><h4>${t('subArchEmpty')}</h4></div></div>`
+      : `<div class="card glass"><div class="empty"><div class="em">🗄️</div><h4>${t('subAllArchived')}</h4><div class="btns"><button class="btn btn-glass sm" data-action="sub-view">${ic('archive')}${t('subArchived')}</button><button class="btn btn-accent sm" data-action="add-sub">${ic('plus')}${t('subAdd')}</button></div></div></div>`;
     else if (!DB.subs.length) body = `<div class="card glass"><div class="empty"><div class="em">🔁</div><h4>${t('subEmpty')}</h4><p>${t('subEmptySub')}</p><div class="btns"><button class="btn btn-accent sm" data-action="add-sub">${ic('plus')}${t('subAdd')}</button></div></div></div>`;
     else if (!rows.length) body = `<div class="card glass">${emptyState('nomatch')}</div>`;
     else if (isMobile() || window.innerWidth < 760) {   // 手机布局或窄屏：卡片列表
@@ -2730,10 +2756,9 @@
           $('#bl-sum', m).innerHTML = `<div class="dim">${t('subColTotal')}</div><b class="num">${money(tot)}</b>
             <small>${t('subPayN', { n: counted.length })}${counted.length ? ` · ${t('subBillAvg', { v: money(tot / counted.length) })}` : ''}${nAdj ? ` · ${t('subBillAdjN', { n: nAdj })}` : ''}</small>`;
           // 账单范围：从哪天到哪天、为什么在这里停（到期日 / 第一笔记账续费 / 今天）
-          const ds = bills.map(b => b.date).sort(), firstReal = bills.filter(b => b.real).map(b => b.date).sort()[0];
+          const ds = bills.map(b => b.date).sort();
           const why = [];
           if (s.trialDays > 0 && s.cycle !== 'once') why.push(t('subBillWhyTrial', { d: billStart(s) }));
-          if (firstReal) why.push(t('subBillWhyRec', { d: firstReal }));
           if (s.expire && s.expire <= tk) why.push(t('subBillWhyExp', { d: s.expire }));
           $('#bl-range', m).innerHTML = ds.length ? `${ic('cal')}${t('subBillRange', { a: ds[0], b: ds[ds.length - 1], n: bills.length })}${why.length ? `<small>${why.join('；')}</small>` : ''}` : '';
           if (!bills.length) { $('#bl-list', m).innerHTML = `<div class="empty sm"><p>${t('subBillNone')}</p></div>`; return; }
@@ -2949,6 +2974,7 @@
           if (cat === '__custom') { const nm = $('#sf-cat-c', m).value.trim(); if (!nm) { toast(t('subErrCat'), 'err'); $('#sf-cat-c', m).focus(); return; } cat = findOrAddCat(nm); }
           if (cat === '__manage') cat = catPrev;
           const buy = r.cycle === 'once', forever = buy || $('#sf-forever', m).checked, expire = forever ? '' : $('#sf-expire', m).value;
+          if (expire && expire < r.start) { toast(t('subErrExpire'), 'err'); $('#sf-expire', m).focus(); return; }
           if (buy) { r.trialDays = 0; st.remind = 0; }   // 买断：没有试用期、过期时间和提醒
           let site = $('#sf-site', m).value.trim();
           if (site && !/^[a-z][a-z0-9+.-]*:\/\//i.test(site)) site = 'https://' + site;   // 没写 http(s):// 自动补上
@@ -3503,7 +3529,8 @@
         };
         // 编辑已同步过的记录时沿用当时的价格，避免因行情变化导致数量对不上
         const syncPx = a => (ex && ex.applied && ex.accountId === a.id && ex.appliedPx > 0 ? +ex.appliedPx : +a.price || 0);
-        let recvTouched = !!(ex && ex.type === 'transfer');
+        // 编辑已有转账：跨币种 / 按数量 / 有到账差额的保留原到账；同币种且到账 = 转出的，到账继续跟着金额走（改金额不会凭空多出差额）
+        let recvTouched = !!(ex && ex.type === 'transfer' && (ex.recvDiff || ex.fromUnit || ex.toUnit || (ex.toCcy && ex.toCcy !== ex.ccy) || Math.abs((+ex.toAmount || 0) - (+ex.amount || 0)) > 1e-9));
         /** 转入“新建资产”：按小表单生成一项新资产（还没保存），保存转账时才加入资产列表 */
         const draftAsset = () => {
           const cls = $('#tn-cls', m).value, code = $('#tn-code', m).value.trim().toUpperCase(), name = $('#tn-name', m).value.trim();
@@ -4167,7 +4194,7 @@
     const p = conv(q.price, q.ccy, aCcy(a));
     if (!(p > 0)) throw new Error('Bad price');
     a.price = round8(p); a.updatedAt = Date.now(); a.lastErr = '';
-    if (q.prev > 0) { a.prevClose = round8(conv(q.prev, q.ccy, aCcy(a))); a.prevDay = todayKey(); }
+    if (q.prev > 0) { a.prevClose = round8(conv(q.prev, q.ccy, aCcy(a))); a.prevDay = todayKey(); a.prevRaw = +q.prev; a.realPrev = !!q.realPrev; }   // prevRaw：接口原始昨收（不受汇率影响），用来判断是不是新的一场交易
   }
   async function refreshOne(a) {
     try { await quoteInto(a); save(); renderAll(); }

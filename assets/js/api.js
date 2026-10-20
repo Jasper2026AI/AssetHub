@@ -208,12 +208,12 @@
         throw e;
       }
     }
-    if (k === 'stock') return await stockQuote(a.code, S);
+    if (k === 'stock') return Object.assign(await stockQuote(a.code, S), { realPrev: true });   // 股票：prev 是交易所的昨收
     if (k === 'gold') {
       const unit = a.unit || 'oz';
       const f = unit === 'g' ? 1 / OZ_G : unit === 'kg' ? 1000 / OZ_G : 1;
       const q = await goldQuote(a.ccy || 'USD', S);
-      return { price: q.price * f, prev: q.prev * f, ccy: q.ccy };
+      return { price: q.price * f, prev: q.prev * f, ccy: q.ccy, realPrev: !!q.src };   // 上海金有真实昨收；gold-api / PAXG 的起点是推算的
     }
     throw new Error('MANUAL');
   }
