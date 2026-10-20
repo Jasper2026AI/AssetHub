@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -274,6 +274,34 @@
     SYNC.timer = setTimeout(() => syncNow({ silent: true }), 10000);   // 停止操作 10 秒后再上传，减少 Gist 版本数
     renderSyncBtn();
   }
+  /** 合并每日快照（同一个账本的几台设备之间）：同一天整份采用“最后记录”的那一份（价格、余额、日盈亏、当天总资产一起），
+      最高 / 最低取两边的最大 / 最小；今天的“今日起点”（po / bo）以本机为准。这样几台设备的历史记录完全一致。
+      返回 { changed: 本机有变化, needPush: 本机有云端没有 / 比云端新的过去记录 } */
+  function mergeSnaps(cs) {
+    cs = cs || {};
+    const tk = todayKey(), num = v => typeof v === 'number' && isFinite(v);
+    let changed = false, needPush = false;
+    Object.keys(cs).forEach(k => {
+      const c = cs[k], l = DB.snaps[k];
+      if (!c) return;
+      if (!l) { DB.snaps[k] = JSON.parse(JSON.stringify(c)); changed = true; return; }
+      const hi = Math.max(num(l.h) ? l.h : -Infinity, num(c.h) ? c.h : -Infinity), lo = Math.min(num(l.l) ? l.l : Infinity, num(c.l) ? c.l : Infinity);
+      if ((c.dt || 0) > (l.dt || 0)) {
+        const m = JSON.parse(JSON.stringify(c));
+        ['p', 'b', 'd', 'tp'].forEach(f => { if (m[f] == null && l[f] != null) m[f] = l[f]; });
+        if (k === tk) { m.po = Object.assign({}, c.po, l.po); m.bo = Object.assign({}, c.bo, l.bo); }
+        if (isFinite(hi)) m.h = hi; if (isFinite(lo)) m.l = lo;
+        DB.snaps[k] = m; changed = true;
+      } else {
+        if (isFinite(hi) && hi !== l.h) { l.h = hi; changed = true; }
+        if (isFinite(lo) && lo !== l.l) { l.l = lo; changed = true; }
+        ['p', 'b', 'd', 'tp'].forEach(f => { if (l[f] == null && c[f] != null) { l[f] = JSON.parse(JSON.stringify(c[f])); changed = true; } });
+        if (k < tk && (l.dt || 0) > (c.dt || 0)) needPush = true;
+      }
+    });
+    Object.keys(DB.snaps).forEach(k => { if (k < tk && !cs[k]) needPush = true; });
+    return { changed, needPush };
+  }
   /** 把云端的数据套用到本机：只替换资产、记账、账本信息，设备自己的设置（布局、配色、密码等）保持不变 */
   function applyCloud(obj) {
     backupNow('pull');
@@ -282,19 +310,12 @@
     DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, assetCls: c.meta.assetCls || DB.meta.assetCls, whs: c.meta.whs || DB.meta.whs, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
     // 每日快照：同一个 Gist 的两台设备互相合并；换了 Gist（另一个账本）就直接用云端的，不把旧账本的历史带进来
     const sameBook = S().snapsGist === S().gistId;
-    const loc = DB.snaps;
-    DB.snaps = sameBook ? Object.assign({}, c.snaps, DB.snaps) : (c.snaps || {});
-    // 同一天两边都有记录：各资产日盈亏明细取更晚记录的那一份（例如那天只在手机上打开过到很晚）
-    if (sameBook && c.snaps) Object.keys(c.snaps).forEach(k => {
-      const cs = c.snaps[k], ls = loc[k];
-      if (ls && cs && cs.d && (!ls.d || (cs.dt || 0) > (ls.dt || 0))) DB.snaps[k] = Object.assign({}, ls, { d: cs.d, tp: cs.tp || ls.tp, dt: cs.dt });
-    });
+    if (sameBook) mergeSnaps(c.snaps); else DB.snaps = c.snaps || {};
     const seen = new Set(), merged = [];
     (sameBook ? DB.audit || [] : []).concat(obj.audit || []).sort((x, y) => x.ts - y.ts).forEach(e => { const k = e.ts + e.kind + e.id + e.act; if (!seen.has(k)) { seen.add(k); merged.push(e); } });
     DB.audit = merged.slice(-2000);
     S().snapsGist = S().gistId;
     pruneSnaps();
-    if (S().dfix && S().dfix !== 'restored') fixDayRecords(false);   // 云端拉下来的旧记录也按新口径修正
     S().syncedStamp = c.meta.updatedAt || 0;
   }
   /** 合并行情 API Key（每次同步都做，和资产数据谁新谁旧无关）：
@@ -609,6 +630,9 @@
         const cloud = await decodeCloud(fresh.content, { interactive: inter, allowForce: true });
         if (!validData(cloud)) throw new Error('BAD_DATA');
         const keysPush = mergeKeys(cloud);
+        // 每日快照每次同步都合并（不只在拉取时），并把本机较新的过去记录补传上去，几台设备的日历就会一致
+        const sm = S().snapsGist === S().gistId ? mergeSnaps(cloud.snaps) : { changed: false, needPush: false };
+        if (sm.changed) { pruneSnaps(); save(); }
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
         const cloudNew = (cStamp > (S().syncedStamp || 0) && cStamp !== DB.meta.updatedAt) || (!cStamp && !S().syncedStamp && !localDirty && (cloud.assets.length || cloud.txs.length || (cloud.subs || []).length));
         let action = 'none';
@@ -628,7 +652,8 @@
         else if (action === 'push') { await pushCloud(inter); save(); if (!opt.silent) toast(t('syncPushed'), 'ok'); }
         else { S().gistLast = Date.now(); save(); if (!opt.silent) toast(t('syncUpToDate'), 'ok'); }
         if (SYNC.reenc && action !== 'push') { await pushCloud(inter); save(); toast(t('reencDone'), 'ok'); }
-        else if (keysPush && action !== 'push') { await pushCloud(inter); save(); }   // 只有 Key 变了也要上传
+        else if ((keysPush || sm.needPush) && action !== 'push') { await pushCloud(inter); save(); }   // 只有 Key / 每日记录变了也要上传
+        if (sm.changed && action === 'none') renderAll();
         if (UI.page === 'settings') renderPage();
       }
       SYNC.reenc = false;
@@ -4816,7 +4841,7 @@
   const demoNow = autoDemo();
   pruneSnaps();
   if (!S().dfix) { const n = fixDayRecords(true); S().dfix = n ? 'v73' : 'none'; save(); if (n) setTimeout(() => toast(t('dfixDone', { n })), 1500); }
-  else if (S().dfix !== 'restored') { if (fixDayRecords(false)) save(); }
+
   renderAll();
   if (demoNow) setTimeout(() => toast(t('demoAuto')), 600);
   // 升级前就填过行情 Key 的设备：标记一次，让 Key 同步到其他设备
