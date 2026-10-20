@@ -1249,3 +1249,6 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
 .pd-date span{flex:none}
 .pd-date .input{flex:1;min-width:0}
 #pd-date-hint{color:#FFB04D}
+/* ===== v7.9 美股盘前 / 盘后参考价 ===== */
+.ext-p{display:block;font-size:11px;font-weight:500;color:var(--text-2,rgba(255,255,255,.6));white-space:nowrap}
+.ext-p b{font-weight:600}

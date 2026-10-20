@@ -168,10 +168,20 @@
     const order = [S.stockSrc].concat(Object.keys(STOCK_SOURCES).filter(k => k !== S.stockSrc))
       .filter(k => STOCK_SOURCES[k] && S[STOCK_SOURCES[k].keyField]);
     if (!order.length) throw new Error('NO_KEY');
-    // 美股常规交易时段以外（盘前 / 盘后 / 周末）：市值按常规交易的收盘价算（和券商市值一致），不用盘前盘后成交价
+    // 美股常规交易时段以外（盘前 / 盘后 / 周末）：市值按常规交易的收盘价（东方财富）；所选行情源给的盘前 / 盘后成交价另外带回来，只做参考显示
     if (isUSCode(code) && !usRegularOpen()) {
-      try { const v = await emUSQuote(code); return Object.assign(v, { ccy: 'USD', regClose: true }); } catch (e) { /* 东方财富取不到：照常用所选行情源 */ }
+      const [em, pv] = await Promise.allSettled([emUSQuote(code), providerQuote(order, code, S)]);
+      if (em.status === 'fulfilled') {
+        const out = Object.assign(em.value, { ccy: 'USD', regClose: true });
+        if (pv.status === 'fulfilled' && pv.value.price > 0 && Math.abs(pv.value.price - out.price) > 1e-9) out.ext = { p: pv.value.price, k: usSession() };
+        return out;
+      }
+      if (pv.status === 'fulfilled') return pv.value;   // 东方财富取不到：照常用所选行情源
+      throw pv.reason || new Error('No data');
     }
+    return providerQuote(order, code, S);
+  }
+  async function providerQuote(order, code, S) {
     let err;
     for (const k of order) {
       try {
@@ -190,6 +200,13 @@
     const wd = g('weekday'), mins = (+g('hour') % 24) * 60 + +g('minute');
     if (wd === 'Sat' || wd === 'Sun') return false;
     return mins >= 570 && mins < 960;
+  }
+  /** 常规时段以外的美股时段：盘前（美东工作日 4:00–9:30）显示“盘前”，其余（盘后 / 夜间 / 周末）显示“盘后” */
+  function usSession(now) {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(now || new Date());
+    const g = t => (parts.find(x => x.type === t) || {}).value;
+    const wd = g('weekday'), mins = (+g('hour') % 24) * 60 + +g('minute');
+    return wd !== 'Sat' && wd !== 'Sun' && mins >= 240 && mins < 570 ? 'pre' : 'post';
   }
   const isUSCode = c => /^[A-Z][A-Z0-9]{0,5}(\.US)?$/.test(c) || /^[A-Z]{1,5}\.[AB]$/.test(c);   // AAPL / AAPL.US / BRK.B 这类 A、B 股
   /** 东方财富 push2 行情（免费、无需 Key）：先直接读取，被跨域限制时改用 JSONP */
@@ -406,7 +423,7 @@
 
   window.AVApi = {
     FX_SOURCES, CRYPTO_SOURCES, STOCK_SOURCES,
-    fetchRates, cryptoQuote, cryptoPriceUSD, stockQuote, stockCcy, quoteAsset, quoteKind, canQuote, isGold, OZ_G,
+    fetchRates, cryptoQuote, cryptoPriceUSD, stockQuote, stockCcy, quoteAsset, quoteKind, canQuote, isGold, OZ_G, usRegularOpen,
     gistPush, gistPull, gistPullMeta, gistIdOf, cleanToken, gistHistory, gistVersion, GOLD_SOURCES, goldQuote
   };
 })();

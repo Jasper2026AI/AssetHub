@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '7.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2057,7 +2057,7 @@
       { k: 'wh', label: t('colWh'), th: whFilterHTML(true), tdCls: 'wh', td: r => (r.a.warehouse ? esc(r.a.warehouse) : '<span class="dim">—</span>') },
       { k: 'qty', label: t('colQty'), th: t('colQty'), thCls: 'r', tdCls: 'r num', td: r => `${qtyStr(r.a)}${unitSuffix(r.a)}` },
       { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: 8 }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: 8 })}</small>` : ''); } },
-      { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: 8 }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: 8 })}</small>` : ''); } },
+      { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: 8 }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: 8 })}</small>` : '') + extTag(r.a); } },
       Object.assign({ k: 'val', label: t('colValue'), tdCls: r => `r num strong ${r.v < 0 ? 'down' : ''}`, td: r => { const x = cc(r); return `${money(r.v, { max: 8 })}${x.orig ? `<small>${money(aVal(r.a), { ccy: x.ccy, max: 8 })}</small>` : ''}`; } }, sortTh('val', t('colValue'))),
       Object.assign({ k: 'day', label: t('colDay'), tdCls: r => `r num ${upDown(r.day)}`, td: r => `${dayCell(r.day, r.dayPct)}${resetDayBtn(r.a, r.day)}` }, sortTh('day', t('colDay'))),
       Object.assign({ k: 'pnl', label: t('colPnl'), tdCls: r => `r num ${isBalance(r.a) ? 'dim' : upDown(r.pnl)}`, td: r => { if (isBalance(r.a)) return t('noPnl'); const c = aCostD(r.a); return `${money(r.pnl, { sign: true })}<small class="${upDown(r.pnl)}">${pct(c ? (r.pnl / Math.abs(c)) * 100 : 0)}</small>`; } }, sortTh('pnl', t('colPnl'))),
@@ -2090,7 +2090,7 @@
           <div class="hc-grid">
             <div><div class="l">${bal ? t('cashBalance') : t('colQty')}</div><div class="x num">${qtyStr(a)}${unitSuffix(a)}</div></div>
             <div><div class="l">${t('colCost')}</div><div class="x num">${bal ? '—' : money(conv(+a.cost || 0, aCcy(a)), { max: 8 })}</div></div>
-            <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : money(conv(+a.price || 0, aCcy(a)), { max: 8 })}</div></div>
+            <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : money(conv(+a.price || 0, aCcy(a)), { max: 8 }) + extTag(a)}</div></div>
           </div>
           ${a.warehouse ? `<div class="hc-wh">${ic('db')}${esc(a.warehouse)}</div>` : ''}
           ${H.batch ? '' : `<div class="hc-ops">${histBtn('asset', a.id)}${quickBtn(a)}<button class="op edit" data-action="edit-asset" data-id="${a.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}">${ic('trash')}${t('del')}</button></div>`}
@@ -2111,6 +2111,13 @@
   /** 手动维护的资产显示“更新市值 / 更新余额”快捷按钮 */
   const histBtn = (kind, id) => `<button class="op hist" data-action="history" data-kind="${kind}" data-id="${id}" title="${t('history')}">${ic('clock')}</button>`;
   const canQuickUpdate = a => isBalance(a) || !(a.source === 'online' && Api.canQuote(a));
+  /** 盘前 / 盘后参考价（美股常规时段以外才显示；12 小时内取到的） */
+  const extTag = a => {
+    const e = a.ext;
+    if (!e || !(e.p > 0) || !(+a.price > 0) || Date.now() - (e.at || 0) > 12 * 3600e3 || Api.usRegularOpen()) return '';
+    const pc = (e.p / +a.price - 1) * 100;
+    return `<small class="ext-p">${t(e.k === 'pre' ? 'extPre' : 'extPost')} ${money(conv(e.p, aCcy(a)), { max: 8 })} <b class="${upDown(pc)}">${pc >= 0 ? '+' : ''}${pc.toFixed(2)}%</b></small>`;
+  };
   const quickBtn = (a, iconOnly) => (canQuickUpdate(a) ? `<button class="op upd" data-action="update-val" data-id="${a.id}" title="${isBalance(a) ? t('updBal') : t('updVal')}">${ic('refresh')}${iconOnly ? '' : isBalance(a) ? t('updBalS') : t('updValS')}</button>` : '');
   const resetDayBtn = (a, day) => (!UI.hold.batch && canResetDay(a) && Math.abs(day) >= 0.005
     ? `<button class="reset-day" data-action="reset-day" data-id="${a.id}" title="${t('resetDayTip')}">${ic('refresh')}${t('resetDay')}</button>` : '');
@@ -4195,6 +4202,8 @@
     const p = conv(q.price, q.ccy, aCcy(a));
     if (!(p > 0)) throw new Error('Bad price');
     a.price = round8(p); a.updatedAt = Date.now(); a.lastErr = '';
+    // 美股盘前 / 盘后成交价：只做参考显示（市值、日盈亏仍按收盘价）
+    if (q.ext && q.ext.p > 0) a.ext = { p: round8(conv(q.ext.p, q.ccy, aCcy(a))), k: q.ext.k, at: Date.now() }; else delete a.ext;
     if (q.prev > 0) { a.prevClose = round8(conv(q.prev, q.ccy, aCcy(a))); a.prevDay = todayKey(); a.prevRaw = +q.prev; a.realPrev = !!q.realPrev; }   // prevRaw：接口原始昨收（不受汇率影响），用来判断是不是新的一场交易
   }
   async function refreshOne(a) {
