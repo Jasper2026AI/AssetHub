@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '7.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2116,7 +2116,7 @@
     const e = a.ext;
     if (!e || !(e.p > 0) || !(+a.price > 0) || Date.now() - (e.at || 0) > 12 * 3600e3 || Api.usRegularOpen()) return '';
     const pc = (e.p / +a.price - 1) * 100;
-    return `<small class="ext-p">${t(e.k === 'pre' ? 'extPre' : 'extPost')} ${money(conv(e.p, aCcy(a)), { max: 8 })} <b class="${upDown(pc)}">${pc >= 0 ? '+' : ''}${pc.toFixed(2)}%</b></small>`;
+    return `<small class="ext-p">${t(e.k === 'pre' ? 'extPre' : 'extPost')} ${money(conv(e.p, aCcy(a)), { max: 8 })} <b class="${upDown(pc)}">${pc >= 0 ? '+' : ''}${pc.toFixed(2)}%</b>${e.t ? ` <i>${esc(e.t)} ET</i>` : ''}</small>`;
   };
   const quickBtn = (a, iconOnly) => (canQuickUpdate(a) ? `<button class="op upd" data-action="update-val" data-id="${a.id}" title="${isBalance(a) ? t('updBal') : t('updVal')}">${ic('refresh')}${iconOnly ? '' : isBalance(a) ? t('updBalS') : t('updValS')}</button>` : '');
   const resetDayBtn = (a, day) => (!UI.hold.batch && canResetDay(a) && Math.abs(day) >= 0.005
@@ -4203,7 +4203,7 @@
     if (!(p > 0)) throw new Error('Bad price');
     a.price = round8(p); a.updatedAt = Date.now(); a.lastErr = '';
     // 美股盘前 / 盘后成交价：只做参考显示（市值、日盈亏仍按收盘价）
-    if (q.ext && q.ext.p > 0) a.ext = { p: round8(conv(q.ext.p, q.ccy, aCcy(a))), k: q.ext.k, at: Date.now() }; else delete a.ext;
+    if (q.ext && q.ext.p > 0) a.ext = { p: round8(conv(q.ext.p, q.ccy, aCcy(a))), k: q.ext.k, t: q.ext.t || '', at: Date.now() }; else delete a.ext;
     if (q.prev > 0) { a.prevClose = round8(conv(q.prev, q.ccy, aCcy(a))); a.prevDay = todayKey(); a.prevRaw = +q.prev; a.realPrev = !!q.realPrev; }   // prevRaw：接口原始昨收（不受汇率影响），用来判断是不是新的一场交易
   }
   async function refreshOne(a) {

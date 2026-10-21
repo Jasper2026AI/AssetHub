@@ -168,16 +168,21 @@
     const order = [S.stockSrc].concat(Object.keys(STOCK_SOURCES).filter(k => k !== S.stockSrc))
       .filter(k => STOCK_SOURCES[k] && S[STOCK_SOURCES[k].keyField]);
     if (!order.length) throw new Error('NO_KEY');
-    // 美股常规交易时段以外（盘前 / 盘后 / 周末）：市值按常规交易的收盘价（东方财富）；所选行情源给的盘前 / 盘后成交价另外带回来，只做参考显示
+    // 美股常规交易时段以外（盘前 / 盘后 / 周末）：市值按常规交易的收盘价；盘前 / 盘后成交价另外带回来，只做参考显示
+    //   收盘价 + 盘前盘后价：腾讯（一次请求都有，带时间）→ 东方财富（只有收盘价）→ 所选行情源（Finnhub 等）
     if (isUSCode(code) && !usRegularOpen()) {
-      const [em, pv] = await Promise.allSettled([emUSQuote(code), providerQuote(order, code, S)]);
-      if (em.status === 'fulfilled') {
-        const out = Object.assign(em.value, { ccy: 'USD', regClose: true });
-        if (pv.status === 'fulfilled' && pv.value.price > 0 && Math.abs(pv.value.price - out.price) > 1e-9) out.ext = { p: pv.value.price, k: usSession() };
+      const pvP = providerQuote(order, code, S).then(v => ({ ok: true, v }), e => ({ ok: false, e }));
+      let base = null;
+      try { base = await tcUSQuote(code); } catch (e) { try { base = await emUSQuote(code); } catch (e2) { /* 两个都取不到 */ } }
+      const pv = await pvP;
+      if (base) {
+        const out = { price: base.price, prev: base.prev, ccy: 'USD', regClose: true };
+        if (base.ext) out.ext = base.ext;
+        else if (pv.ok && pv.v.price > 0 && Math.abs(pv.v.price - out.price) > 1e-9) out.ext = { p: pv.v.price, k: usSession() };
         return out;
       }
-      if (pv.status === 'fulfilled') return pv.value;   // 东方财富取不到：照常用所选行情源
-      throw pv.reason || new Error('No data');
+      if (pv.ok) return pv.v;   // 腾讯、东方财富都取不到：照常用所选行情源
+      throw pv.e || new Error('No data');
     }
     return providerQuote(order, code, S);
   }
@@ -215,6 +220,18 @@
     let j;
     try { j = await fetchJSON(url, { timeout: 8000 }); } catch (e) { j = await jsonp(url, 10000); }
     return j && j.data;
+  }
+  /** 美股：腾讯行情（免费、无需 Key、网页可直接读取）。qt = 常规交易报价（[3] 收盘 / 现价，[4] 昨收）；
+      pandata = 盘前（tag: before）/ 盘后（tag: after）最新成交价和时间（美东） */
+  async function tcUSQuote(code) {
+    const sym = code.replace(/\.US$/, '');
+    const j = await fetchJSON('https://web.ifzq.gtimg.cn/appstock/app/UsMinute/query?code=' + encodeURIComponent('us' + sym), { timeout: 8000 });
+    const key = j && j.data && Object.keys(j.data)[0], d = key && j.data[key], q = d && d.qt && d.qt[key];
+    if (!q || !(+q[3] > 0)) throw new Error('No data');
+    const out = { price: +q[3], prev: +q[4] || 0 };
+    const pd = d.pandata;
+    if (pd && (pd.tag === 'before' || pd.tag === 'after') && +pd.last > 0) out.ext = { p: +pd.last, k: pd.tag === 'before' ? 'pre' : 'post', t: String(pd.time || '').slice(11, 16) };
+    return out;
   }
   /** 美股常规交易收盘价（东方财富，不含盘前盘后）：{ price, prev }。交易所代码 105 纳斯达克 / 106 纽交所 / 107 美交所，找到后记住 */
   const EM_US_MKT = {};
