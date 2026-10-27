@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -217,8 +217,15 @@
   }
   function save() {
     recordSnap();
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
-    catch (e) { toast(t('saveFail'), 'err'); }
+    const raw = JSON.stringify(DB);
+    try { localStorage.setItem(STORE_KEY, raw); return; } catch (e) { /* 空间不够：先腾地方再试 */ }
+    // 账本数据比本机备份重要：依次清掉修正备份、旧的本机备份，腾出空间后再存
+    const steps = [() => localStorage.removeItem('assethub.dfix.bak'), () => trimBackups(2), () => trimBackups(0)];
+    for (const st of steps) {
+      try { st(); } catch (e) { /* ignore */ }
+      try { localStorage.setItem(STORE_KEY, raw); toast(t('saveFreed'), 'ok'); return; } catch (e) { /* 继续腾 */ }
+    }
+    toast(t('saveFail'), 'err');
   }
 
   /* ---- 多端同步（GitHub Gist） ----
@@ -484,14 +491,56 @@
 
   /* ================= 本机自动备份（加载演示 / 导入 / 清空 / 云端覆盖 / 恢复 之前） ================= */
   const BACKUP_KEY = 'assethub.backups.v1';
+  const BACKUP_MAX = 5, BACKUP_CAP = 1200 * 1024;   // 最多 5 份、合计约 1.2 MB 字符（浏览器给每个网站约 5 MB）
   function readBackups() { try { const l = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
+  /** v8.2：本机备份压缩保存（gzip + base64，通常只有原来的 1/5～1/10）；旧的未压缩备份读取时照常可用 */
+  function packData(str) {
+    if (!window.pako) return str;
+    try {
+      const z = window.pako.gzip(new TextEncoder().encode(str));
+      let bin = ''; for (let i = 0; i < z.length; i += 0x8000) bin += String.fromCharCode.apply(null, z.subarray(i, i + 0x8000));
+      return 'z:' + btoa(bin);
+    } catch (e) { return str; }
+  }
+  function unpackData(s) {
+    if (typeof s !== 'string' || !s.startsWith('z:')) return s;
+    const bin = atob(s.slice(2)), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(window.pako.ungzip(u));
+  }
+  const strHash = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + str.length.toString(36); };
+  /** 写入备份列表：按新→旧，超过份数或总大小上限就丢掉最旧的；写不进去也继续丢旧的 */
+  function writeBackups(list) {
+    list = list.slice(0, BACKUP_MAX);
+    let total = list.reduce((a, b) => a + (b.data || '').length, 0);
+    while (list.length > 1 && total > BACKUP_CAP) total -= (list.pop().data || '').length;
+    while (list.length) { try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return true; } catch (e) { list.pop(); } }
+    try { localStorage.removeItem(BACKUP_KEY); } catch (e) { /* ignore */ }
+    return false;
+  }
+  function trimBackups(n) { if (n <= 0) { localStorage.removeItem(BACKUP_KEY); return; } writeBackups(readBackups().slice(0, n)); }
+  /** 启动时整理：把旧版本留下的未压缩备份压缩、去掉超出上限的，立刻腾出空间 */
+  function tidyBackups() {
+    const list = readBackups(); if (!list.length) return;
+    let changed = false;
+    list.forEach(b => { if (b.data && !String(b.data).startsWith('z:')) { if (!b.h) b.h = strHash(b.data); const p = packData(b.data); if (p !== b.data) { b.data = p; changed = true; } } });
+    if (changed || list.length > BACKUP_MAX || list.reduce((a, b) => a + (b.data || '').length, 0) > BACKUP_CAP) writeBackups(list);
+  }
   function backupNow(reason) {
     if (!DB.assets.length && !DB.txs.length && !(DB.subs || []).length) return;
-    const data = JSON.stringify({ assets: DB.assets, txs: DB.txs, subs: DB.subs, meta: DB.meta, snaps: DB.snaps, audit: DB.audit });
-    let list = readBackups().filter(b => b.data !== data);
-    list.unshift({ ts: Date.now(), reason, n: DB.assets.length, m: DB.txs.length, name: DB.meta.name || '', demo: !!DB.meta.demo, data });
-    list = list.slice(0, 10);
-    while (list.length) { try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return; } catch (e) { list.pop(); } }
+    const list0 = readBackups();
+    // 每次从云端拉取都会备份：6 小时内已经有一份“拉取前”的备份就不再重复
+    if (reason === 'pull' && list0.some(b => b.reason === 'pull' && Date.now() - b.ts < 6 * 3600e3)) return;
+    const raw = JSON.stringify({ assets: DB.assets, txs: DB.txs, subs: DB.subs, meta: DB.meta, snaps: DB.snaps, audit: DB.audit }), h = strHash(raw);
+    const list = list0.filter(b => b.h !== h && b.data !== raw);
+    list.unshift({ ts: Date.now(), reason, n: DB.assets.length, m: DB.txs.length, name: DB.meta.name || '', demo: !!DB.meta.demo, h, data: packData(raw) });
+    writeBackups(list);
+  }
+  /** 本机存储用量（字符数 ≈ 字节，浏览器上限约 5 MB） */
+  function storageUse() {
+    const len = k => { try { return (localStorage.getItem(k) || '').length; } catch (e) { return 0; } };
+    let other = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k !== STORE_KEY && k !== BACKUP_KEY) other += len(k); } } catch (e) { /* ignore */ }
+    return { data: len(STORE_KEY), backups: len(BACKUP_KEY), other };
   }
   /** 变成空白账本：清空资产 / 记账 / 快照 / 日志（先自动备份），不再填充演示数据；
       保留本机设置（Token、密码、API Key、语言、配色等），但断开当前 Gist，避免云端旧数据被拉回来 */
@@ -579,7 +628,7 @@
         m.addEventListener('click', async e => {
           const b = e.target.closest('[data-rc]'); if (!b) return;
           const k = b.dataset.rc;
-          if (k === 'local') { const it = readBackups()[+b.dataset.i]; if (it) doRestore(JSON.parse(it.data), 'local ' + dateTimeStr(it.ts)); return; }
+          if (k === 'local') { const it = readBackups()[+b.dataset.i]; if (it) { let obj = null; try { obj = JSON.parse(unpackData(it.data)); } catch (e2) { toast(t('importBad'), 'err'); return; } doRestore(obj, 'local ' + dateTimeStr(it.ts)); } return; }
           if (k === 'legacy') { doRestore(legacy, 'AssetView'); return; }
           if (k === 'load-cloud') {
             b.disabled = true; b.classList.add('spin');
@@ -3245,6 +3294,11 @@
           <p class="set-desc">${t('pwaSub')}</p>${body}</div>`;
   }
 
+  function storageNoteHTML() {
+    const u = storageUse(), kb = n => (n / 1024).toFixed(0) + ' KB', tot = u.data + u.backups + u.other, pc = Math.min(100, (tot / (5 * 1024 * 1024)) * 100);
+    return `<div class="store-note"><div class="sn-bar"><i style="width:${pc.toFixed(1)}%" class="${pc > 80 ? 'hot' : ''}"></i></div>
+      <span>${t('storeUse', { d: kb(u.data), b: kb(u.backups), o: kb(u.other), p: pc.toFixed(0) })}</span></div>`;
+  }
   function dfixNoteHTML() {
     let b; try { b = JSON.parse(localStorage.getItem('assethub.dfix.bak') || 'null'); } catch (e) { b = null; }
     if (!b || !b.d) return '';
@@ -3280,6 +3334,7 @@
             <button class="btn btn-glass" data-action="recover">${ic('clock')}${t('recoverT')}</button>
             <button class="btn btn-danger" data-action="clear">${ic('trash')}${t('clearAll')}</button>
           </div>
+          ${storageNoteHTML()}
           ${dfixNoteHTML()}
         </div>
         <div class="card glass">
@@ -4991,6 +5046,7 @@
   }
 
   /* ============ 启动 ============ */
+  try { tidyBackups(); } catch (e) { /* 整理失败不影响使用 */ }
   const demoNow = autoDemo();
   pruneSnaps();
   if (!S().dfix) { const n = fixDayRecords(true); S().dfix = n ? 'v73' : 'none'; save(); if (n) setTimeout(() => toast(t('dfixDone', { n })), 1500); }
