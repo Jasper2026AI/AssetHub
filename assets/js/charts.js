@@ -41,6 +41,26 @@
     return { top, interval, ticks };
   }
 
+  /** 纵轴刻度：等距（step 同 yScale）或压缩（√）。压缩时大额照样最高，但小额不会被压成一条线。
+      返回 { ticks, top, f(v) → 0..1 的高度比例 } */
+  function niceCeil(x) {
+    if (x <= 0) return 1;
+    const e = Math.floor(Math.log10(x));
+    for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) { const v = m * Math.pow(10, e); if (v >= x - 1e-9) return v; }
+    return 10 * Math.pow(10, e);
+  }
+  function valScale(max, opt) {
+    opt = opt || {};
+    if (opt.scale === 'sqrt' && max > 0) {
+      const top = niceCeil(max), ticks = [0];
+      [1 / 16, 1 / 4, 9 / 16].forEach(f => { const v = niceNum(top * f); if (v > ticks[ticks.length - 1] && v < top) ticks.push(v); });
+      ticks.push(top);
+      return { ticks, top, f: v => Math.sqrt(Math.max(0, v) / top) };
+    }
+    const sc = yScale(max, opt.step);
+    return { ticks: sc.ticks, top: sc.top, f: v => v / sc.top };
+  }
+
   /* ---------- 单调三次曲线（不会出现低于 0 的过冲） ---------- */
   function monotonePath(p) {
     const n = p.length;
@@ -121,12 +141,12 @@
     const n = labels.length;
     let max = 0;
     series.forEach(s => s.values.forEach(v => { if (v != null && v > max) max = v; }));
-    const sc = yScale(max, cfg.step);
+    const sc = valScale(max, cfg);
     const yl = sc.ticks.map(cfg.fmtY || String);
     const padL = Math.ceil(Math.max(...yl.map(s => s.length)) * 6.8) + 14, padR = 14, padT = 16, padB = 30;
     const pw = W - padL - padR, ph = H - padT - padB;
     const X = i => padL + (n === 1 ? pw / 2 : (i * pw) / (n - 1));
-    const Y = v => padT + ph - (v / sc.top) * ph;
+    const Y = v => padT + ph - sc.f(v) * ph;
     const base = padT + ph;
 
     let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>`;
@@ -219,7 +239,7 @@
     const Y = v => padT + ph - ((v - y0) / (y1 - y0)) * ph;
     const base = padT + ph;
     const first = bars[0].o, last = bars[n - 1].c;
-    const trendC = last >= first ? cfg.up : cfg.down;
+    const trendC = cfg.lineColor || (last >= first ? cfg.up : cfg.down);
 
     let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="kg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${trendC}" stop-opacity=".26"/><stop offset="1" stop-color="${trendC}" stop-opacity="0"/></linearGradient></defs>`;
     ticks.forEach((v, i) => {
@@ -339,5 +359,56 @@
     ov.addEventListener('pointerleave', () => { el.classList.remove('hover'); gs.forEach(g => g.classList.remove('hl')); });
   }
 
-  window.AVCharts = { donut, line, candle, bars, yScale };
+  /* ---------- 分组柱状图（收支：每天 / 每月一组，收入、支出并排） ----------
+     cfg: { labels:[], series:[{name,color,values}], scale:'sqrt'|'', step, fmtY, tip(i), mark(i) } */
+  function gbars(el, cfg) {
+    const W = Math.max(280, Math.floor(el.clientWidth || 600));
+    const H = Math.max(180, Math.floor(el.clientHeight || 270));
+    const { labels, series } = cfg, n = labels.length, m = series.length;
+    let max = 0; series.forEach(se => se.values.forEach(v => { if (v != null && v > max) max = v; }));
+    const sc = valScale(max, cfg);
+    const yl = sc.ticks.map(cfg.fmtY || String);
+    const padL = Math.ceil(Math.max(...yl.map(s => s.length)) * 6.8) + 14, padR = 10, padT = 16, padB = 30;
+    const pw = W - padL - padR, ph = H - padT - padB, slot = pw / Math.max(1, n), base = padT + ph;
+    const gw = Math.min(slot * 0.78, 44), bw = Math.max(2, (gw - (m - 1) * 2) / m);
+    const X = i => padL + slot * i + slot / 2, Y = v => padT + ph - sc.f(v) * ph;
+    let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+    sc.ticks.forEach((v, i) => {
+      const y = Y(v);
+      s += `<line class="gl ${i === 0 ? 'base' : ''}" x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}"/>`;
+      s += `<text class="al" x="${padL - 10}" y="${y + 4}" text-anchor="end">${yl[i]}</text>`;
+    });
+    const k = Math.ceil(n / Math.max(2, Math.floor(pw / 40)));
+    labels.forEach((lb, i) => {
+      if (i % k === 0 || i === n - 1 && (n - 1) % k >= k / 2) s += `<text class="al ${cfg.mark && cfg.mark(i) ? 'mk' : ''}" x="${X(i)}" y="${H - 8}" text-anchor="middle">${lb}</text>`;
+    });
+    for (let i = 0; i < n; i++) {
+      let g = '';
+      series.forEach((se, j) => {
+        const v = se.values[i]; if (!(v > 0)) return;
+        const x = X(i) - gw / 2 + j * (bw + 2), y = Y(v), h = base - y, r = Math.min(4, bw / 2, h);
+        g += `<path d="M${x},${base}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${base}Z" fill="${se.color}"/>`;
+      });
+      if (g) s += `<g class="bar-g ${cfg.mark && cfg.mark(i) ? 'mk' : ''}" data-i="${i}" style="animation-delay:${Math.min(i * 14, 360)}ms">${g}</g>`;
+    }
+    s += `<rect class="ov" x="${padL}" y="0" width="${pw}" height="${H}" fill="transparent"/></svg>`;
+    el.innerHTML = s + `<div class="chart-tip"></div>`;
+    const tip = el.querySelector('.chart-tip'), ov = el.querySelector('.ov'), gs = el.querySelectorAll('.bar-g');
+    const move = e => {
+      const rect = el.getBoundingClientRect();
+      const i = Math.max(0, Math.min(n - 1, Math.floor((e.clientX - rect.left - padL) / slot)));
+      if (series.every(se => se.values[i] == null)) { el.classList.remove('hover'); return; }
+      el.classList.add('hover');
+      gs.forEach(g => g.classList.toggle('hl', +g.dataset.i === i));
+      tip.innerHTML = cfg.tip ? cfg.tip(i) : '';
+      const tw = tip.offsetWidth || 160, top = Math.max(...series.map(se => se.values[i] || 0));
+      tip.style.left = Math.max(tw / 2 + 4, Math.min(W - tw / 2 - 4, X(i))) + 'px';
+      tip.style.top = Math.max(Y(top), tip.offsetHeight + 18) + 'px';
+    };
+    ov.addEventListener('pointermove', move);
+    ov.addEventListener('pointerdown', move);
+    ov.addEventListener('pointerleave', () => { el.classList.remove('hover'); gs.forEach(g => g.classList.remove('hl')); });
+  }
+
+  window.AVCharts = { donut, line, candle, bars, gbars, yScale };
 })();

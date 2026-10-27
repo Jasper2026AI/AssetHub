@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -112,6 +112,7 @@
     'chev-l': '<path d="M15 6l-6 6 6 6"/>',
     'chev-d': '<path d="M6 9l6 6 6-6"/>',
     'chev-u': '<path d="M6 15l6-6 6 6"/>',
+    bars: '<path d="M5 20V11M10 20V5M15 20v-7M20 20V9"/>',
     archive: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M10 13h4"/>',
     unarchive: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9M12 17v-5M9.5 14.5 12 12l2.5 2.5"/>',
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -911,12 +912,13 @@
       const p = DB.snaps[k].p;
       if (p && p[a.id] != null) return p[a.id];
     }
-    if ((a.createdAt || 0) >= new Date(startKey + 'T00:00:00').getTime()) return +a.addPrice || +a.price || 0;   // 期内新录入：从录入时价格起算
+    // 周期开始前没有记录：先用期内第一次记录的价格（录入价可能是后来才补记的当时价格，不一定准）
     for (const k of keys) {
       if (k < startKey) continue;
       const p = DB.snaps[k].p;
       if (p && p[a.id] != null && k < todayKey()) return p[a.id];
     }
+    if ((a.createdAt || 0) >= new Date(startKey + 'T00:00:00').getTime()) return +a.addPrice || +a.price || 0;   // 期内新录入、还没有记录：从录入时价格起算
     if (a.prevClose > 0) return a.prevClose;
     return +a.price || 0;
   }
@@ -1398,6 +1400,7 @@
           <div class="seg seg-title">
             <button class="${mode === 'asset' ? 'on' : ''}" data-action="trend-mode" data-v="asset">${t('assetTrendTitle')}</button>
             <button class="${mode === 'flow' ? 'on' : ''}" data-action="trend-mode" data-v="flow">${t('trendTitle')}</button>
+            <button class="${mode === 'pnl' ? 'on' : ''}" data-action="trend-mode" data-v="pnl">${t('pnlTrendTitle')}</button>
           </div>
           <div class="head-tools" id="trend-tools"></div>
         </div>
@@ -1776,7 +1779,8 @@
   /* ---- 收支趋势 / 资产趋势 ---- */
   function drawTrend() {
     if (!$('#trend')) return;
-    if (S().trendMode === 'asset') drawAssetTrend(); else drawFlowTrend();
+    const m = S().trendMode;
+    if (m === 'asset') drawAssetTrend(); else if (m === 'pnl') drawPnlTrend(); else drawFlowTrend();
   }
   function flowData(range) {
     const now = new Date(), tk = todayKey();
@@ -1808,27 +1812,112 @@
       if (x.type === 'income') map[k].inc += txD(x); else map[k].exp += txD(x);
     });
     const cur = range === 'year' ? tk.slice(0, 7) : tk;
-    return { labels, tips, inc: keys.map(k => (k > cur ? null : map[k].inc)), exp: keys.map(k => (k > cur ? null : map[k].exp)) };
+    return { keys, labels, tips, inc: keys.map(k => (k > cur ? null : map[k].inc)), exp: keys.map(k => (k > cur ? null : map[k].exp)) };
+  }
+  /** 收支刻度：auto = 有少数几天金额特别大（如发工资）时自动压缩刻度，否则等距；sqrt = 压缩；lin = 等距自动；数字 = 等距、按该单位 */
+  function flowScaleOf(D) {
+    const v = S().flowScale || (S().yStep && S().yStep !== 'auto' ? S().yStep : 'auto');
+    if (v === 'sqrt') return { scale: 'sqrt', auto: false };
+    if (v !== 'auto') return { scale: '', step: v === 'lin' ? 'auto' : v, auto: false };
+    const nz = D.inc.concat(D.exp).filter(x => x > 0).sort((a, b) => a - b);
+    if (nz.length < 3) return { scale: '', step: 'auto', auto: true };
+    const p75 = nz[Math.floor(nz.length * 0.75) - (nz.length % 4 === 0 ? 1 : 0)] || nz[nz.length - 1], mx = nz[nz.length - 1];
+    return mx > p75 * 8 ? { scale: 'sqrt', auto: true } : { scale: '', step: 'auto', auto: true };
   }
   function drawFlowTrend() {
-    const range = S().chartRange, D = flowData(range), C = colors();
+    const range = S().chartRange, D = flowData(range), C = colors(), style = S().flowStyle || 'bar';
+    const fsv = S().flowScale || (S().yStep && S().yStep !== 'auto' ? S().yStep : 'auto');
     $('#trend-tools').innerHTML = `
+      <div class="seg">
+        <button class="${style === 'bar' ? 'on' : ''}" data-action="flow-style" data-v="bar" title="${t('chartBar')}">${ic('bars')}</button>
+        <button class="${style === 'line' ? 'on' : ''}" data-action="flow-style" data-v="line" title="${t('kLine')}">${ic('linechart')}</button></div>
       <div class="seg">${['week', 'month', 'year'].map(r => `<button class="${range === r ? 'on' : ''}" data-action="range" data-v="${r}">${t('r_' + r)}</button>`).join('')}</div>
-      <label class="mini-select">${t('yStep')}<select data-change="yStep">${['auto', '10', '100', '1000', '10000'].map(v =>
-        `<option value="${v}" ${String(S().yStep) === v ? 'selected' : ''}>${v === 'auto' ? t('auto') : symOf(S().ccy) + fmtNum(+v, 0, 0)}</option>`).join('')}</select></label>`;
+      <label class="mini-select">${t('yStep')}<select data-change="flowScale">${['auto', 'sqrt', 'lin', '10', '100', '1000', '10000'].map(v =>
+        `<option value="${v}" ${fsv === v ? 'selected' : ''}>${v === 'auto' ? t('auto') : v === 'sqrt' ? t('scaleSqrt') : v === 'lin' ? t('scaleLin') : symOf(S().ccy) + fmtNum(+v, 0, 0)}</option>`).join('')}</select></label>`;
     const sumI = D.inc.reduce((s, v) => s + (v || 0), 0), sumE = D.exp.reduce((s, v) => s + (v || 0), 0);
+    const sc = flowScaleOf(D);
     $('#trend-legend').innerHTML = `<span><i style="background:${C.up}"></i>${t('income')} <b class="num">${money(sumI)}</b></span>
       <span><i style="background:${C.down}"></i>${t('expense')} <b class="num">${money(sumE)}</b></span>
-      <span>${t('balance')} <b class="num ${upDown(sumI - sumE)}">${money(sumI - sumE, { sign: true })}</b></span>`;
-    const sym = symOf(S().ccy);
-    Charts.line($('#trend'), {
-      labels: D.labels, step: S().yStep,
+      <span>${t('balance')} <b class="num ${upDown(sumI - sumE)}">${money(sumI - sumE, { sign: true })}</b></span>
+      ${sc.scale === 'sqrt' ? `<span class="dim">${t(sc.auto ? 'scaleSqrtAuto' : 'scaleSqrtOn')}</span>` : ''}`;
+    const sym = symOf(S().ccy), tk = todayKey(), cur = range === 'year' ? tk.slice(0, 7) : tk;
+    const cfg = {
+      labels: D.labels, step: sc.step, scale: sc.scale,
       series: [{ name: t('income'), color: C.up, values: D.inc }, { name: t('expense'), color: C.down, values: D.exp }],
       fmtY: v => (hidden() ? '' : sym + compact(v)),
+      mark: i => D.keys && D.keys[i] === cur,
       tip: i => `<div class="tt">${D.tips[i]}</div>
         <div class="tr"><span><i style="background:${C.up}"></i>${t('income')}</span><b class="num">${money(D.inc[i] || 0)}</b></div>
         <div class="tr"><span><i style="background:${C.down}"></i>${t('expense')}</span><b class="num">${money(D.exp[i] || 0)}</b></div>
         <div class="tr"><span>${t('balance')}</span><b class="num">${money((D.inc[i] || 0) - (D.exp[i] || 0), { sign: true })}</b></div>`
+    };
+    if (style === 'line') Charts.line($('#trend'), cfg); else Charts.gbars($('#trend'), cfg);
+  }
+  /** 投资盈亏趋势：日（每天的投资日盈亏）/ 月 / 年。每根 = 从 0 到当期盈亏的柱子（实线模式连成线） */
+  function pnlBars(range) {
+    recordSnap();
+    const tk = todayKey(), keys = snapKeys().filter(k => k <= tk), out = [];
+    const mk = (key, label, tip, r) => { const v = r.pnl; return { key, label, tip, o: 0, c: v, h: Math.max(0, v), l: Math.min(0, v), pct: r.pct, est: r.est }; };
+    if (range === 'day') {
+      if (!keys.includes(tk)) keys.push(tk);
+      keys.forEach(k => { const r = invDay(k); if (r) out.push(mk(k, `${k.slice(5, 7)}/${k.slice(8)}`, dayLabel(k) + ' ' + k.slice(0, 4), r)); });
+    } else if (range === 'month') {
+      Array.from(new Set(keys.map(k => k.slice(0, 7)))).sort().forEach(m => {
+        const r = invMonth(m); if (r) out.push(mk(m, `${m.slice(2, 4)}/${m.slice(5)}`, periodLabel('month', m + '-01'), r));
+      });
+    } else {
+      Array.from(new Set(keys.map(k => k.slice(0, 4)))).sort().forEach(y => {
+        const r = invYear(y); if (r) out.push(mk(y, y, periodLabel('year', y + '-01-01'), r));
+      });
+    }
+    return out;
+  }
+  function drawPnlTrend() {
+    const s = S(), range = s.pnlRange || 'day', span = s.pSpan || '1M', style = s.pStyle || 'candle', C = colors();
+    $('#trend-tools').innerHTML = `
+      <div class="seg">
+        <button class="${style === 'line' ? 'on' : ''}" data-action="p-style" data-v="line" title="${t('kLine')}">${ic('linechart')}</button>
+        <button class="${style === 'candle' ? 'on' : ''}" data-action="p-style" data-v="candle" title="${t('chartBar')}">${ic('bars')}</button></div>
+      <div class="seg">${['day', 'month', 'year'].map(r => `<button class="${range === r ? 'on' : ''}" data-action="pnl-range" data-v="${r}">${t('ar_' + r)}</button>`).join('')}</div>
+      ${range === 'day' ? `<div class="seg">${Object.keys(K_SPANS).map(k => `<button class="${span === k ? 'on' : ''}" data-action="p-span" data-v="${k}">${k === 'ALL' ? t('all') : k}</button>`).join('')}</div>` : ''}`;
+    let bars = pnlBars(range);
+    const all = bars.length;
+    if (range === 'day') {
+      const n = Math.min(K_SPANS[span], all);
+      UI.pEnd = Math.max(0, Math.min(UI.pEnd || 0, all - n));
+      bars = bars.slice(all - n - UI.pEnd, all - UI.pEnd);
+      if (bars.length > 200) bars = bars.map(b => Object.assign({}, b, { label: `${b.key.slice(2, 4)}/${b.key.slice(5, 7)}` }));
+    }
+    const el = $('#trend');
+    if (!bars.length) {
+      $('#trend-legend').innerHTML = '';
+      el.innerHTML = `<div class="empty"><div class="em">📊</div><h4>${t('noSnap')}</h4><p>${t('noSnapSub')}</p></div>`;
+      return;
+    }
+    const sum = bars.reduce((a, b) => a + b.c, 0), ups = bars.filter(b => b.c > 1e-9).length, downs = bars.filter(b => b.c < -1e-9).length;
+    const best = bars.reduce((a, b) => (b.c > a.c ? b : a)), worst = bars.reduce((a, b) => (b.c < a.c ? b : a));
+    const unit = t(range === 'day' ? 'pnlUnitDay' : range === 'month' ? 'pnlUnitMonth' : 'pnlUnitYear');
+    $('#trend-legend').innerHTML = `<span>${esc(bars[0].tip)} → ${esc(bars[bars.length - 1].tip)}</span>
+      <span>${t('pnlSum')} <b class="num ${upDown(sum)}">${money(sum, { sign: true })}</b></span>
+      <span>${t('pnlUpDown', { u: ups, d: downs, x: unit })}</span>
+      <span>${t('pnlBest')} <b class="num ${upDown(best.c)}">${money(best.c, { sign: true })}</b></span>
+      <span>${t('pnlWorst')} <b class="num ${upDown(worst.c)}">${money(worst.c, { sign: true })}</b></span>
+      ${range === 'day' && K_SPANS[span] < all ? `<span class="dim">${t('kDragHint')}</span>` : ''}`;
+    const sym = symOf(s.ccy);
+    Charts.candle(el, {
+      bars, style, up: C.up, down: C.down, lineColor: sum >= 0 ? C.up : C.down,
+      fmtY: v => (hidden() ? '' : (v < 0 ? '-' : '') + sym + compact(Math.abs(v))),
+      tip: i => {
+        const b = bars[i];
+        return `<div class="tt">${esc(b.tip)}${b.est ? ` <span class="est-tag">${t('calEst')}</span>` : ''}</div>
+          <div class="tr"><span>${t(range === 'day' ? 'kpiDay' : range === 'month' ? 'kpiMonth' : 'kpiYear')}</span><b class="num ${upDown(b.c)}">${money(b.c, { sign: true })}</b></div>
+          <div class="tr"><span>${t('kChange')}</span><b class="num ${upDown(b.c)}">${pct(b.pct || 0)}</b></div>`;
+      },
+      onPan: range === 'day' && K_SPANS[span] < all ? delta => { UI.pEnd = (UI.pEnd || 0) + delta; drawPnlTrend(); } : null,
+      onZoom: range === 'day' ? dir => {
+        const ks = Object.keys(K_SPANS), i = ks.indexOf(span), j = Math.max(0, Math.min(ks.length - 1, i + dir));
+        if (j !== i) { s.pSpan = ks[j]; save(); drawPnlTrend(); }
+      } : null
     });
   }
   /** 总资产 K 线数据：月内（每日）/ 年内（每月）/ 日K（全部每日） */
@@ -1964,7 +2053,7 @@
         <label class="search">${ic('search')}<input data-input="holdQ" value="${esc(H.q)}" placeholder="${t('holdSearchPh')}" autocomplete="off"></label>
         <label class="mini-select">${ic('sort')}<select data-change="holdSort">${['valDesc', 'valAsc', 'dayDesc', 'dayAsc', 'pnlDesc', 'pnlAsc'].map(v => `<option value="${v}" ${H.sort === v ? 'selected' : ''}>${t('sort_' + v)}</option>`).join('')}</select></label>
         <span class="src-tool">${srcFilterHTML(false)}</span>
-        <span class="src-tool">${whFilterHTML(false)}</span>
+        <span class="src-tool" id="wh-tool">${whFilterHTML(false)}</span>
         ${colBtnHTML('hold')}
       </div>
       <div class="chips mb">${chips}<button class="chip chip-tool" data-action="asset-cats">${ic('sliders')}${t('assetMgrS')}</button></div>
@@ -2136,12 +2225,13 @@
   /** 资产仓库筛选：全部 / 每个仓库（数量）/ 未填写 */
   function whFilterHTML(compact) {
     const H = UI.hold, cnt = {};
-    DB.assets.forEach(a => { const w = a.warehouse || ''; cnt[w] = (cnt[w] || 0) + 1; });
+    const inC = DB.assets.filter(a => inCls(a, H.cls));   // 仓库选项跟着当前资产类别走
+    inC.forEach(a => { const w = a.warehouse || ''; cnt[w] = (cnt[w] || 0) + 1; });
     if (H.wh !== '__all' && cnt[H.wh] == null) H.wh = '__all';   // 筛选的仓库已不存在
     whList(); const names = Object.keys(cnt).filter(Boolean).sort((x, y) => whOrd(x) - whOrd(y) || cnt[y] - cnt[x] || x.localeCompare(y));
     const opt = (v, label) => `<option value="${esc(v)}" ${H.wh === v ? 'selected' : ''}>${esc(label)}</option>`;
     return `<label class="mini-select ${compact ? 'th-select' : ''}">${compact ? '' : ic('db')}<select data-change="holdWh">${
-      opt('__all', compact ? t('colWh') : `${t('whAll')} (${DB.assets.length})`) + names.map(w => opt(w, `${w} (${cnt[w]})`)).join('') + (cnt[''] ? opt('', `${t('whNone')} (${cnt['']})`) : '')}</select></label>`;
+      opt('__all', compact ? t('colWh') : `${t('whAll')} (${inC.length})`) + names.map(w => opt(w, `${w} (${cnt[w]})`)).join('') + (cnt[''] ? opt('', `${t('whNone')} (${cnt['']})`) : '')}</select></label>`;
   }
   /** 行情来源单元格 */
   const srcCell = a => srcBadge(a);
@@ -2895,7 +2985,7 @@
         <button type="button" class="btn btn-glass sm" id="sf-auto">${ic('refresh')}${t('subAutoExp')}</button></div>
         <div class="hint" id="sf-exp-hint"></div></div>
       <div class="row2">
-        <div class="field"><label>${t('subColPay')} <span class="dim">· ${t('codeOpt')}</span></label><select class="input" id="sf-pay">${balOptions(st.payId || '', t('subPayNone'))}</select></div>
+        <div class="field"><label>${t('subColPay')} <span class="dim">· ${t('codeOpt')}</span></label><select class="input" id="sf-pay">${balOptions(st.payId || '', t('subPayNone'), '', 'any')}</select></div>
         <div class="field" id="sf-remind-f"><label>${t('subColRemind')}</label><div class="seg seg-full" id="sf-remind">${[0, 1, 3, 7].map(n => `<button type="button" data-v="${n}" class="${+st.remind === n ? 'on' : ''}">${n ? t('subRemindB', { n }) : t('subRemind0')}</button>`).join('')}</div></div>
       </div>
       <div class="field" style="margin-bottom:4px"><label>${t('noteOpt')}</label><input class="input" id="sf-note" maxlength="120" value="${esc(st.note || '')}" placeholder="${t('notePh')}"></div>
@@ -3430,9 +3520,21 @@
     if (g['']) keys.push('');
     return keys.map(k => ({ label: k || t('whNone'), list: g[k] }));
   }
+  /** 最近记账账户：按已有记账里用到的次数排序（收支看关联账户；转账分别看转出 / 转入），取前 5 个 */
+  function recentAccts(kind) {
+    const cnt = {};
+    DB.txs.forEach(x => {
+      const ids = kind === 'to' ? (x.type === 'transfer' ? [x.toId] : []) : kind === 'from' ? (x.type === 'transfer' ? [x.accountId] : []) : (x.type !== 'transfer' ? [x.accountId] : []);
+      ids.forEach(id => { if (id) cnt[id] = (cnt[id] || 0) + 1; });
+    });
+    return Object.keys(cnt).filter(id => findAsset(id)).sort((a, b) => cnt[b] - cnt[a]).slice(0, 5).map(id => findAsset(id));
+  }
+  const recentGroup = (list, optFn) => (list.length ? `<optgroup label="${esc(t('recentAccts'))}">${list.map(a => optFn(a, true)).join('')}</optgroup>` : '');
   function accountOptions(sel) {
-    return `<option value="">${t('noAccount')}</option>` + whGroups().map(gr =>
-      `<optgroup label="${esc(gr.label)}">${gr.list.map(a => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}${a.code ? ' · ' + esc(a.code) : ''} (${aCcy(a)})</option>`).join('')}</optgroup>`).join('');
+    const rec = recentAccts('any'), inRec = new Set(rec.map(a => a.id));
+    const opt = (a, top) => `<option value="${a.id}" ${a.id === sel && (top || !inRec.has(a.id)) ? 'selected' : ''}>${esc(a.name)}${a.code ? ' · ' + esc(a.code) : ''} (${aCcy(a)})</option>`;
+    return `<option value="">${t('noAccount')}</option>` + recentGroup(rec, opt) + whGroups().map(gr =>
+      `<optgroup label="${esc(gr.label)}">${gr.list.map(a => opt(a, false)).join('')}</optgroup>`).join('');
   }
   function txCcyList(extra) {
     const set = new Set(DISPLAY_CCYS);
@@ -3444,12 +3546,14 @@
   const validCcy = c => /^[A-Z]{3,5}$/.test(c) && !!rateOf(c);
   /** 转账账户：所有资产按仓库分组；现金类显示余额，其他显示持有数量 */
   const NEW_OPT = () => `<option value="__new">${t('newAssetOpt')}</option>`;
-  function balOptions(sel, first, extra) {
-    return `<option value="">${first || t('pickAcct')}</option>` + (extra || '') + whGroups().map(gr =>
-      `<optgroup label="${esc(gr.label)}">${gr.list.map(a => {
-        const u = qtyUnit(a), amt = hidden() ? MASK : u ? `${trim8(+a.qty || 0)} ${u}` : `${aCcy(a)} ${fmtNum(+a.qty || 0, 0, 2)}`;
-        return `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)} (${esc(amt)})</option>`;
-      }).join('')}</optgroup>`).join('');
+  function balOptions(sel, first, extra, kind) {
+    const rec = recentAccts(kind || 'from'), inRec = new Set(rec.map(a => a.id));
+    const opt = (a, top) => {
+      const u = qtyUnit(a), amt = hidden() ? MASK : u ? `${trim8(+a.qty || 0)} ${u}` : `${aCcy(a)} ${fmtNum(+a.qty || 0, 0, 2)}`;
+      return `<option value="${a.id}" ${a.id === sel && (top || !inRec.has(a.id)) ? 'selected' : ''}>${esc(a.name)} (${esc(amt)})</option>`;
+    };
+    return `<option value="">${first || t('pickAcct')}</option>` + (extra || '') + recentGroup(rec, opt) + whGroups().map(gr =>
+      `<optgroup label="${esc(gr.label)}">${gr.list.map(a => opt(a, false)).join('')}</optgroup>`).join('');
   }
   function openTxModal(ex, presetType, presetSub) {
     const st = ex ? Object.assign({}, ex, { sync: !!ex.applied })
@@ -3470,7 +3574,7 @@
         <div class="field"><label id="tf-acct-l">${t('account')}</label><select class="input" id="tf-acct">${accountOptions(st.accountId)}</select></div>
       </div>
       <div class="row2" id="tf-to-row" style="display:none">
-        <div class="field"><label>${t('transferTo')}</label><select class="input" id="tf-to">${balOptions(st.toId, '', NEW_OPT())}</select></div>
+        <div class="field"><label>${t('transferTo')}</label><select class="input" id="tf-to">${balOptions(st.toId, '', NEW_OPT(), 'to')}</select></div>
         <div class="field" id="tf-recv-wrap" style="visibility:hidden"><label id="tf-recv-l">${t('received')}</label><input class="input num" id="tf-recv" inputmode="decimal" autocomplete="off" value="${st.toAmount != null ? esc(trim8(st.toAmount)) : ''}"><div class="recv-diff" id="tf-recv-diff"></div></div>
       </div>
       <div class="tf-new" id="tf-new" style="display:none">
@@ -4566,6 +4670,10 @@
     'asset-range'(el) { S().assetRange = el.dataset.v; UI.kEnd = 0; save(); drawTrend(); },
     'k-span'(el) { S().kSpan = el.dataset.v; UI.kEnd = 0; save(); drawTrend(); },
     'k-style'(el) { S().kStyle = el.dataset.v; save(); drawTrend(); },
+    'flow-style'(el) { S().flowStyle = el.dataset.v; save(); drawTrend(); },
+    'p-style'(el) { S().pStyle = el.dataset.v; save(); drawTrend(); },
+    'pnl-range'(el) { S().pnlRange = el.dataset.v; UI.pEnd = 0; save(); drawTrend(); },
+    'p-span'(el) { S().pSpan = el.dataset.v; UI.pEnd = 0; save(); drawTrend(); },
     /** 立即同步这一项资产的行情（只更新它自己的单价 / 市值） */
     async 'sync-one'(el) {
       const a = findAsset(el.dataset.id); if (!a || el.classList.contains('spin')) return;
@@ -4579,7 +4687,14 @@
         toast(`${esc(a.name)} · ${errText(e)}`, 'err');
       }
     },
-    'hold-filter'(el) { UI.hold.cls = el.dataset.v; $$('[data-action="hold-filter"]').forEach(b => b.classList.toggle('on', b === el)); renderHoldBody(); },
+    'hold-filter'(el) {
+      const H = UI.hold; H.cls = el.dataset.v;
+      // 换类别后，选中的仓库在这个类别里没有资产：仓库筛选自动回到“全部”，不会出现空列表
+      if (H.wh !== '__all' && !DB.assets.some(a => inCls(a, H.cls) && (a.warehouse || '') === H.wh)) H.wh = '__all';
+      $$('[data-action="hold-filter"]').forEach(b => b.classList.toggle('on', b === el));
+      const tool = $('#wh-tool'); if (tool) tool.innerHTML = whFilterHTML(false);
+      renderHoldBody();
+    },
     'hold-sort-head'(el) {
       const k = el.dataset.v, H = UI.hold;
       H.sort = H.sort === k + 'Desc' ? k + 'Asc' : k + 'Desc';
@@ -4817,6 +4932,7 @@
       if (c === 'subStep') { S().subStep = el.value; save(); drawSubCharts(allSubPays()); return; }
       if (c === 'ccy') { S().ccy = el.value; save(); renderAll(); return; }
       if (c === 'yStep') { S().yStep = el.value; save(); drawTrend(); return; }
+      if (c === 'flowScale') { S().flowScale = el.value; save(); drawTrend(); return; }
       if (c === 'rankCls') { S().rankCls = el.value; save(); renderRank(); return; }
       if (c === 'holdSort') { UI.hold.sort = el.value; renderHoldBody(); return; }
       if (c === 'pnlUp' || c === 'pnlDown') { S()[c] = el.value; S().pnlStyle = 'custom'; save(); applyTheme(); renderAll(); return; }
