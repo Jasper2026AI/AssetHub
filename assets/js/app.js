@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2602,7 +2602,8 @@
       // 单期调整：折扣（自定义金额）/ 免费（0）/ 跳过（这期没扣费，不计入）
       const base = priceAt(s, d), a = s.adj && s.adj[d];
       const amt = a ? (a.t === 'free' || a.t === 'skip' ? 0 : +a.amt || 0) : base;
-      if (!(a && a.t === 'skip') || all) est.push({ date: d, v: conv(amt, s.ccy), amt, base, ccy: s.ccy, real: false, tag: a ? a.t : '', note: a ? a.n || '' : '' });
+      const ac = a && a.t === 'custom' && a.ccy ? a.ccy : s.ccy;   // 单期改价可以换货币（如这期用别的币种付）
+      if (!(a && a.t === 'skip') || all) est.push({ date: d, v: conv(amt, ac), amt, base, ccy: ac, real: false, tag: a ? a.t : '', note: a ? a.n || '' : '' });
       if (s.cycle === 'once') break;
       d = cycleAt(b0, s, ++n);
     }
@@ -2872,6 +2873,11 @@
   }
 
   /* ---- 账单明细：价格时间线 + 每期账单调整（只影响订阅统计，不动账户余额和到期时间） ---- */
+  /** 单期账单可选的货币：订阅本身的货币 + 账本里用过的货币（含自定义货币），有汇率的才列出 */
+  function billCcys(cur) {
+    const set = new Set([cur].concat(txCcyList(), (DB.subs || []).map(x => (x.ccy || '').toUpperCase())));
+    return Array.from(set).filter(c => c && validCcy(c));
+  }
   function openSubBills(s, keep) {
     const tk = todayKey();
     const st = keep || { prices: JSON.parse(JSON.stringify(s.prices || [])), adj: JSON.parse(JSON.stringify(s.adj || {})), edit: null, asc: false };
@@ -2913,21 +2919,32 @@
             if (b.real) return `<div class="bl-row real"><span class="num bl-d">${b.date}</span><span class="bl-tag rec">${t('subBillRec')}</span>
               <span class="num bl-a">${money(b.amt, { ccy: b.ccy, max: 2 })}</span><button type="button" class="icon-btn sm" data-tx="${b.id}" title="${t('subBillOpenTx')}">${ic('edit')}</button></div>`;
             const tag = b.tag === 'free' ? t('subBillFree') : b.tag === 'skip' ? t('subBillSkip') : b.tag === 'custom' ? t('subBillDisc') : t('subBillEst');
-            const changed = b.tag && Math.abs(b.amt - b.base) > 1e-9;
+            const changed = b.tag && (Math.abs(b.amt - b.base) > 1e-9 || b.ccy !== cs);
             const row = `<div class="bl-row ${b.tag ? 'adj ' + b.tag : ''} ${st.edit === b.date ? 'open' : ''}" data-d="${b.date}"><span class="num bl-d">${b.date}</span><span class="bl-tag ${b.tag || 'est'}">${tag}</span>
-              <span class="num bl-a">${changed ? `<s>${mny(b.base)}</s>` : ''}${b.tag === 'skip' ? '—' : mny(b.amt)}${b.note ? `<small>${esc(b.note)}</small>` : ''}</span>
+              <span class="num bl-a">${changed ? `<s>${mny(b.base)}</s>` : ''}${b.tag === 'skip' ? '—' : money(b.amt, { ccy: b.ccy, max: 2, raw: true })}${b.ccy !== cs && b.tag !== 'skip' ? `<small>≈ ${money(b.v)}</small>` : ''}${b.note ? `<small>${esc(b.note)}</small>` : ''}</span>
               <button type="button" class="icon-btn sm" data-edit="${b.date}" title="${t('subBillEdit')}">${ic('edit')}</button></div>`;
             if (st.edit !== b.date) return row;
             const a = st.adj[b.date] || {};
             return row + `<div class="bl-ed" data-d="${b.date}">
               <div class="seg seg-full" data-k="t">${['custom', 'free', 'skip'].map(k => `<button type="button" data-v="${k}" class="${(a.t || 'custom') === k ? 'on' : ''}">${t(k === 'custom' ? 'subBillDiscS' : k === 'free' ? 'subBillFree' : 'subBillSkip')}</button>`).join('')}</div>
-              <div class="price-row" style="margin-top:8px"><input class="input num" inputmode="decimal" data-k="amt" value="${a.t === 'custom' || !a.t ? esc(trim8(a.t ? a.amt : b.base)) : '0'}" ${a.t && a.t !== 'custom' ? 'disabled' : ''}><span class="unit-txt">${esc(cs)}</span>
+              <div class="price-row" style="margin-top:8px"><input class="input num" inputmode="decimal" data-k="amt" value="${a.t === 'custom' || !a.t ? esc(trim8(a.t ? a.amt : b.base)) : '0'}" ${a.t && a.t !== 'custom' ? 'disabled' : ''}><select class="input bl-ccy" data-k="ccy" ${a.t && a.t !== 'custom' ? 'disabled' : ''}>${billCcys(a.ccy || cs).map(c => `<option value="${c}" ${(a.ccy || cs) === c ? 'selected' : ''}>${c}</option>`).join('')}<option value="__other">${t('ccy_OTHER')}…</option></select>
                 <input class="input" data-k="n" maxlength="40" placeholder="${t('subBillNotePh')}" value="${esc(a.n || '')}"></div>
               <div class="bl-ed-btns">${a.t ? `<button type="button" class="btn btn-glass sm" data-reset="${b.date}">${t('subBillReset')}</button>` : ''}<button type="button" class="btn btn-accent sm" data-ok="${b.date}">${ic('check')}${t('subBillApply')}</button></div></div>`;
           }).join('');
           $('#bl-list', m).innerHTML = rows;
         };
         drawPrices(); drawList();
+        // 单期货币选“其他…”：输入货币代码（需要有汇率）
+        $('#bl-list', m).addEventListener('change', async e => {
+          const sel = e.target.closest('[data-k="ccy"]'); if (!sel || sel.value !== '__other') return;
+          const prev = sel.dataset.prev || cs;
+          const v = await promptDialog({ title: t('ccy_OTHER'), msg: t('ccyOtherPh'), value: '', placeholder: 'EUR' });
+          const c = String(v || '').trim().toUpperCase();
+          if (!c || !validCcy(c)) { if (c) toast(t('errRate', { c }), 'err'); sel.value = prev; return; }
+          if (![...sel.options].some(o => o.value === c)) sel.insertAdjacentHTML('afterbegin', `<option value="${c}">${c}</option>`);
+          sel.value = c; sel.dataset.prev = c;
+        });
+        $('#bl-list', m).addEventListener('focusin', e => { const sel = e.target.closest('[data-k="ccy"]'); if (sel && sel.value !== '__other') sel.dataset.prev = sel.value; });
         $('#bl-order', m).addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; st.asc = b.dataset.v === 'asc'; $$('#bl-order button', m).forEach(x => x.classList.toggle('on', x === b)); drawList(); });
         $('#bl-add', m).addEventListener('click', () => { const last = st.prices[st.prices.length - 1]; st.prices.push({ from: tk, p: last ? last.p : s.price }); drawPrices(); drawList(); });
         $('#bl-prices', m).addEventListener('input', e => { const i = +e.target.dataset.i; if (isNaN(i)) return; const f = e.target.dataset.f; st.prices[i][f] = f === 'p' ? (e.target.value.trim() === '' ? '' : parseNum(e.target.value)) : e.target.value; drawList(); });
@@ -2937,12 +2954,13 @@
           const ed = e.target.closest('[data-edit]'); if (ed) { st.edit = st.edit === ed.dataset.edit ? null : ed.dataset.edit; drawList(); return; }
           const box = e.target.closest('.bl-ed'); if (!box) return;
           const d = box.dataset.d, sg = e.target.closest('[data-k="t"] [data-v]');
-          if (sg) { $$('[data-k="t"] button', box).forEach(x => x.classList.toggle('on', x === sg)); const inp = $('[data-k="amt"]', box); inp.disabled = sg.dataset.v !== 'custom'; if (inp.disabled) inp.value = '0'; return; }
+          if (sg) { $$('[data-k="t"] button', box).forEach(x => x.classList.toggle('on', x === sg)); const inp = $('[data-k="amt"]', box), cs2 = $('[data-k="ccy"]', box); inp.disabled = cs2.disabled = sg.dataset.v !== 'custom'; if (inp.disabled) inp.value = '0'; return; }
           if (e.target.closest('[data-reset]')) { delete st.adj[d]; st.edit = null; drawList(); return; }
           if (e.target.closest('[data-ok]')) {
             const k = ($('[data-k="t"] .on', box) || {}).dataset.v || 'custom', amt = parseNum($('[data-k="amt"]', box).value), n = $('[data-k="n"]', box).value.trim();
             if (k === 'custom' && !(amt >= 0)) { toast(t('errAmount'), 'err'); return; }
-            st.adj[d] = k === 'custom' ? { t: 'custom', amt: round8(amt), n } : { t: k, n };
+            const bc = ($('[data-k="ccy"]', box) || {}).value || cs;
+            st.adj[d] = k === 'custom' ? Object.assign({ t: 'custom', amt: round8(amt), n }, bc !== cs ? { ccy: bc } : {}) : { t: k, n };
             st.edit = null; drawList();
           }
         });

@@ -1258,3 +1258,9 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
 .sn-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
 .sn-bar i{display:block;height:100%;background:#30D158;border-radius:3px}
 .sn-bar i.hot{background:#FF9F0A}
+/* ===== v8.3 单期账单货币 ===== */
+.bl-ed .price-row .bl-ccy{width:auto;min-width:86px;flex:none;padding:7px 8px}
+@media (max-width:560px){.bl-ed .price-row{flex-wrap:wrap}.bl-ed .price-row [data-k="amt"]{flex:1 1 0;min-width:0}.bl-ed .price-row [data-k="n"]{flex:1 1 100%}}
+body.mobile .bl-ed .price-row{flex-wrap:wrap}
+body.mobile .bl-ed .price-row [data-k="amt"]{flex:1 1 0;min-width:0}
+body.mobile .bl-ed .price-row [data-k="n"]{flex:1 1 100%}
