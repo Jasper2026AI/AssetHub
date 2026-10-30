@@ -1264,3 +1264,6 @@ body.mobile .sub-remind{bottom:calc(92px + env(safe-area-inset-bottom));right:12
 body.mobile .bl-ed .price-row{flex-wrap:wrap}
 body.mobile .bl-ed .price-row [data-k="amt"]{flex:1 1 0;min-width:0}
 body.mobile .bl-ed .price-row [data-k="n"]{flex:1 1 100%}
+/* ===== v8.5 行情来源标注 ===== */
+.src-p{display:block;font-size:11px;font-weight:500;color:var(--text-2,rgba(255,255,255,.5));white-space:nowrap}
+.src-p.fb{color:#FF9F0A}

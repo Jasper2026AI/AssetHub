@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -315,7 +315,7 @@
   /** 把云端的数据套用到本机：只替换资产、记账、账本信息，设备自己的设置（布局、配色、密码等）保持不变 */
   function applyCloud(obj) {
     backupNow('pull');
-    try { mergeKeys(obj); } catch (e) { /* Key 合并失败不影响数据恢复 */ }   // 不论从哪个入口拉取（同步 / 从云端拉取），行情 API Key 都一起恢复
+    try { mergeKeys(obj); mergeSrcs(obj); } catch (e) { /* Key / 来源合并失败不影响数据恢复 */ }   // 不论从哪个入口拉取（同步 / 从云端拉取），行情 API Key 都一起恢复
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs; DB.subs = c.subs || [];
     DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, assetCls: c.meta.assetCls || DB.meta.assetCls, whs: c.meta.whs || DB.meta.whs, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
@@ -331,6 +331,22 @@
   }
   /** 合并行情 API Key（每次同步都做，和资产数据谁新谁旧无关）：
       本机没填而云端有 → 用云端；两边都有 → 以最后修改的为准。返回 true 表示本机的 Key 更新，需要上传 */
+  /** 行情来源（汇率 / 加密 / 黄金 / 股票）随云同步：以最后修改的设备为准 */
+  const SRC_KEYS = ['fxSrc', 'cryptoSrc', 'goldSrc', 'stockSrc'];
+  const srcValid = (k, v) => !!(v && ({ fxSrc: Api.FX_SOURCES, cryptoSrc: Api.CRYPTO_SOURCES, goldSrc: Api.GOLD_SOURCES, stockSrc: Api.STOCK_SOURCES }[k] || {})[v]);
+  function mergeSrcs(cloud) {
+    const cs = cloud && cloud.srcs, lAt = S().srcAt || 0;
+    if (!cs) return lAt > 0;                                   // 云端还没有：本机明确选过就上传
+    const cAt = +cs.at || 0;
+    if (cAt > lAt) {
+      let ch = false;
+      SRC_KEYS.forEach(k => { if (srcValid(k, cs[k]) && S()[k] !== cs[k]) { S()[k] = cs[k]; ch = true; } });
+      S().srcAt = cAt; save();
+      if (ch) UI.srcChanged = true;
+      return false;
+    }
+    return lAt > cAt && SRC_KEYS.some(k => (cs[k] || '') !== (S()[k] || ''));
+  }
   function mergeKeys(cloud) {
     const ak = cloud.apiKeys || {}, cAt = +ak.at || 0, lAt = S().keysAt || 0;
     let changed = false, needPush = false;
@@ -682,7 +698,7 @@
         }
         const cloud = await decodeCloud(fresh.content, { interactive: inter, allowForce: true });
         if (!validData(cloud)) throw new Error('BAD_DATA');
-        const keysPush = mergeKeys(cloud);
+        const keysPush = mergeKeys(cloud) | mergeSrcs(cloud);
         // 每日快照每次同步都合并（不只在拉取时），并把本机较新的过去记录补传上去，几台设备的日历就会一致
         const sm = S().snapsGist === S().gistId ? mergeSnaps(cloud.snaps) : { changed: false, needPush: false };
         if (sm.changed) { pruneSnaps(); save(); }
@@ -708,6 +724,7 @@
         else if ((keysPush || sm.needPush) && action !== 'push') { await pushCloud(inter); save(); }   // 只有 Key / 每日记录变了也要上传
         if (sm.changed && action === 'none') renderAll();
         if (UI.page === 'settings') renderPage();
+        if (UI.srcChanged) { UI.srcChanged = false; refreshQuotes({ silent: true }); toast(t('srcSynced'), 'ok'); }   // 行情来源从云端同步过来了：马上按新来源刷新
       }
       SYNC.reenc = false;
       SYNC.state = 'ok'; SYNC.lastErr = '';
@@ -2195,9 +2212,9 @@
       { k: 'cls', label: t('colClass'), th: t('colClass'), td: r => `<div class="tags">${tagHTML(r.a)}</div>` },
       { k: 'wh', label: t('colWh'), th: whFilterHTML(true), tdCls: 'wh', td: r => (r.a.warehouse ? esc(r.a.warehouse) : '<span class="dim">—</span>') },
       { k: 'qty', label: t('colQty'), th: t('colQty'), thCls: 'r', tdCls: 'r num', td: r => `${qtyStr(r.a)}${unitSuffix(r.a)}` },
-      { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: 8 }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: 8 })}</small>` : ''); } },
-      { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: 8 }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: 8 })}</small>` : '') + extTag(r.a); } },
-      Object.assign({ k: 'val', label: t('colValue'), tdCls: r => `r num strong ${r.v < 0 ? 'down' : ''}`, td: r => { const x = cc(r); return `${money(r.v, { max: 8 })}${x.orig ? `<small>${money(aVal(r.a), { ccy: x.ccy, max: 8 })}</small>` : ''}`; } }, sortTh('val', t('colValue'))),
+      { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: pxMax(conv(+r.a.cost || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: pxMax(+r.a.cost || 0) })}</small>` : ''); } },
+      { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: pxMax(conv(+r.a.price || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: pxMax(+r.a.price || 0) })}</small>` : '') + extTag(r.a) + srcTag(r.a); } },
+      Object.assign({ k: 'val', label: t('colValue'), tdCls: r => `r num strong ${r.v < 0 ? 'down' : ''}`, td: r => { const x = cc(r); return `${money(r.v, { max: 2 })}${x.orig ? `<small>${money(aVal(r.a), { ccy: x.ccy, max: 2 })}</small>` : ''}`; } }, sortTh('val', t('colValue'))),
       Object.assign({ k: 'day', label: t('colDay'), tdCls: r => `r num ${upDown(r.day)}`, td: r => `${dayCell(r.day, r.dayPct)}${resetDayBtn(r.a, r.day)}` }, sortTh('day', t('colDay'))),
       Object.assign({ k: 'pnl', label: t('colPnl'), tdCls: r => `r num ${isBalance(r.a) ? 'dim' : upDown(r.pnl)}`, td: r => { if (isBalance(r.a)) return t('noPnl'); const c = aCostD(r.a); return `${money(r.pnl, { sign: true })}<small class="${upDown(r.pnl)}">${pct(c ? (r.pnl / Math.abs(c)) * 100 : 0)}</small>`; } }, sortTh('pnl', t('colPnl'))),
       { k: 'src', label: t('colSrc'), th: srcFilterHTML(true), td: r => `<div class="srccell">${srcCell(r.a)}</div>` },
@@ -2229,7 +2246,7 @@
           <div class="hc-grid">
             <div><div class="l">${bal ? t('cashBalance') : t('colQty')}</div><div class="x num">${qtyStr(a)}${unitSuffix(a)}</div></div>
             <div><div class="l">${t('colCost')}</div><div class="x num">${bal ? '—' : money(conv(+a.cost || 0, aCcy(a)), { max: 8 })}</div></div>
-            <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : money(conv(+a.price || 0, aCcy(a)), { max: 8 }) + extTag(a)}</div></div>
+            <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : money(conv(+a.price || 0, aCcy(a)), { max: pxMax(conv(+a.price || 0, aCcy(a))) }) + extTag(a) + srcTag(a)}</div></div>
           </div>
           ${a.warehouse ? `<div class="hc-wh">${ic('db')}${esc(a.warehouse)}</div>` : ''}
           ${H.batch ? '' : `<div class="hc-ops">${histBtn('asset', a.id)}${quickBtn(a)}<button class="op edit" data-action="edit-asset" data-id="${a.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}">${ic('trash')}${t('del')}</button></div>`}
@@ -2251,11 +2268,19 @@
   const histBtn = (kind, id) => `<button class="op hist" data-action="history" data-kind="${kind}" data-id="${id}" title="${t('history')}">${ic('clock')}</button>`;
   const canQuickUpdate = a => isBalance(a) || !(a.source === 'online' && Api.canQuote(a));
   /** 盘前 / 盘后参考价（美股常规时段以外才显示；12 小时内取到的） */
+  /** 单价 / 均价显示几位小数：≥ 1 时 2 位，越小越多（最多 8 位，低价币也看得清） */
+  const pxMax = v => { const a = Math.abs(+v || 0); return a >= 1 || !a ? 2 : a >= 0.01 ? 4 : a >= 0.0001 ? 6 : 8; };
   const extTag = a => {
     const e = a.ext;
     if (!e || !(e.p > 0) || !(+a.price > 0) || Date.now() - (e.at || 0) > 12 * 3600e3 || Api.usRegularOpen()) return '';
     const pc = (e.p / +a.price - 1) * 100;
     return `<small class="ext-p">${t(e.k === 'pre' ? 'extPre' : 'extPost')} ${money(conv(e.p, aCcy(a)), { max: 8 })} <b class="${upDown(pc)}">${pc >= 0 ? '+' : ''}${pc.toFixed(2)}%</b>${e.t ? ` <i>${esc(e.t)} ET</i>` : ''}</small>`;
+  };
+  /** 黄金：这次实际用的行情来源和时间；所选来源取不到、退回别的来源时标出来 */
+  const srcTag = a => {
+    const q = a.qsrc; if (!q || !q.s) return '';
+    const hm = new Date(q.at || 0); const tm = `${pad(hm.getHours())}:${pad(hm.getMinutes())}`;
+    return `<small class="src-p ${q.fb ? 'fb' : ''}">${t('qsrc_' + q.s)}${q.fb ? ' · ' + t('qsrcFb', { s: t('qsrc_' + (S().goldSrc || 'goldapi')) }) : ''} · ${tm}</small>`;
   };
   const quickBtn = (a, iconOnly) => (canQuickUpdate(a) ? `<button class="op upd" data-action="update-val" data-id="${a.id}" title="${isBalance(a) ? t('updBal') : t('updVal')}">${ic('refresh')}${iconOnly ? '' : isBalance(a) ? t('updBalS') : t('updValS')}</button>` : '');
   const resetDayBtn = (a, day) => (!UI.hold.batch && canResetDay(a) && Math.abs(day) >= 0.005
@@ -4381,6 +4406,7 @@
     if (!(p > 0)) throw new Error('Bad price');
     a.price = round8(p); a.updatedAt = Date.now(); a.lastErr = '';
     // 美股盘前 / 盘后成交价：只做参考显示（市值、日盈亏仍按收盘价）
+    if (q.src) a.qsrc = { s: q.src, fb: !!q.fb, at: Date.now() }; else delete a.qsrc;   // 这次实际用的行情来源（黄金）
     if (q.ext && q.ext.p > 0) a.ext = { p: round8(conv(q.ext.p, q.ccy, aCcy(a))), k: q.ext.k, t: q.ext.t || '', at: Date.now() }; else delete a.ext;
     if (q.prev > 0) { a.prevClose = round8(conv(q.prev, q.ccy, aCcy(a))); a.prevDay = todayKey(); a.prevRaw = +q.prev; a.realPrev = !!q.realPrev; }   // prevRaw：接口原始昨收（不受汇率影响），用来判断是不是新的一场交易
   }
@@ -4418,7 +4444,7 @@
   function exportable(cloud) {
     const d = JSON.parse(JSON.stringify(DB));
     SECRET_KEYS.forEach(k => { d.settings[k] = ''; });
-    if (cloud) { d.apiKeys = { at: S().keysAt || 0 }; API_KEYS.forEach(k => { d.apiKeys[k] = S()[k] || ''; }); }
+    if (cloud) { d.apiKeys = { at: S().keysAt || 0 }; API_KEYS.forEach(k => { d.apiKeys[k] = S()[k] || ''; }); d.srcs = { at: S().srcAt || 0 }; SRC_KEYS.forEach(k => { d.srcs[k] = S()[k] || ''; }); }
     d.exportedAt = new Date().toISOString();
     return d;
   }
@@ -4973,6 +4999,7 @@
         const obj = await decodeCloud(await Api.gistPull(S().gistToken, S().gistId), { interactive: true });
         if (!validData(obj)) throw new Error('BAD_DATA');
         applyCloud(obj); S().gistLast = Date.now(); save(); renderAll(); toast(t('gistPulled'), 'ok');
+        if (UI.srcChanged) { UI.srcChanged = false; refreshQuotes({ silent: true }); }
       } catch (e) { toast(t('syncFail') + ' · ' + syncErrText(e), 'err'); el.disabled = false; el.classList.remove('spin'); }
     }
   };
@@ -5026,7 +5053,8 @@
           S().switchPull = (DB.meta.updatedAt || 0) <= (S().syncedStamp || 0) || !!DB.meta.demo;
           S().syncedStamp = 0;
         }
-        if (API_KEYS.includes(k)) { S().keysAt = Date.now(); markDirty(); scheduleSync(); }   // 行情 Key 改动同步到其他设备                 // 换了 Gist 视为全新同步
+        if (API_KEYS.includes(k)) { S().keysAt = Date.now(); markDirty(); scheduleSync(); }
+        if (SRC_KEYS.includes(k)) { S().srcAt = Date.now(); markDirty(); scheduleSync(); }   // 行情来源改动同步到其他设备   // 行情 Key 改动同步到其他设备                 // 换了 Gist 视为全新同步
         save();
         if (k === 'gistToken' || k === 'gistId' || k === 'autoSync') { renderSyncBtn(); if (S().autoSync && syncReady()) syncNow({ silent: true, interactive: true }); }
         if (k === 'autoRefresh') setupAutoRefresh();
@@ -5073,7 +5101,8 @@
   renderAll();
   if (demoNow) setTimeout(() => toast(t('demoAuto')), 600);
   // 升级前就填过行情 Key 的设备：标记一次，让 Key 同步到其他设备
-  if (!S().keysAt && API_KEYS.some(k => S()[k])) { S().keysAt = 1; save(); }   // 很小的时间戳：只补给没有 Key 的设备，不覆盖别处的新 Key
+  if (!S().keysAt && API_KEYS.some(k => S()[k])) { S().keysAt = 1; save(); }
+  if (!S().srcAt && SRC_KEYS.some(k => S()[k] && S()[k] !== defaultSettings()[k])) { S().srcAt = 1; save(); }   // 升级前就改过行情来源的设备：标记一次，让它的选择同步给还是默认设置的设备   // 很小的时间戳：只补给没有 Key 的设备，不覆盖别处的新 Key
   if (S().autoSync && syncReady()) setTimeout(() => syncNow({ silent: true }), 400);   // 打开页面先拉取云端最新数据
   // 新版本检查：GitHub Pages 会让浏览器缓存页面约 10 分钟，这里绕过缓存读取 version.json，有新版就提示一键更新
   async function checkUpdate() {

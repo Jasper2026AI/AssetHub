@@ -288,7 +288,7 @@
       const unit = a.unit || 'oz';
       const f = unit === 'g' ? 1 / OZ_G : unit === 'kg' ? 1000 / OZ_G : 1;
       const q = await goldQuote(a.ccy || 'USD', S);
-      return { price: q.price * f, prev: q.prev * f, ccy: q.ccy, realPrev: !!q.src };   // 上海金有真实昨收；gold-api / PAXG 的起点是推算的
+      return { price: q.price * f, prev: q.prev * f, ccy: q.ccy, realPrev: q.src === 'sge9999' || q.src === 'sgetd', src: q.src, fb: !!q.fb };   // 上海金有真实昨收；gold-api / PAXG 的起点是推算的
     }
     throw new Error('MANUAL');
   }
@@ -353,11 +353,11 @@
       try {
         const g = await goldApiQuote(ccy);
         const ratio = paxg && paxg.price > 0 && paxg.prev > 0 ? paxg.prev / paxg.price : 0;
-        return { price: g.price, prev: ratio ? g.price * ratio : 0, ccy: g.ccy };
+        return { price: g.price, prev: ratio ? g.price * ratio : 0, ccy: g.ccy, src: 'goldapi', fb: src !== 'goldapi' };
       } catch (e) { if (!paxg) throw e; }   // gold-api 失败：退回 PAXG
     }
     if (!paxg) throw new Error('No data');
-    return { price: paxg.price, prev: paxg.prev, ccy: 'USD' };
+    return { price: paxg.price, prev: paxg.prev, ccy: 'USD', src: 'paxg', fb: src !== 'paxg' };
   }
 
   /* ---------------- GitHub Gist 同步 ---------------- */
