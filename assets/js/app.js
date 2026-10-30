@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -315,6 +315,7 @@
   /** 把云端的数据套用到本机：只替换资产、记账、账本信息，设备自己的设置（布局、配色、密码等）保持不变 */
   function applyCloud(obj) {
     backupNow('pull');
+    try { mergeKeys(obj); } catch (e) { /* Key 合并失败不影响数据恢复 */ }   // 不论从哪个入口拉取（同步 / 从云端拉取），行情 API Key 都一起恢复
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs; DB.subs = c.subs || [];
     DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, assetCls: c.meta.assetCls || DB.meta.assetCls, whs: c.meta.whs || DB.meta.whs, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
