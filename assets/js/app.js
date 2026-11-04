@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1180,7 +1180,7 @@
   /* ---- 记账 ---- */
   // 转账可在任意资产之间进行：amount / fee 是转出资产的“数量”（现金类即金额），value / feeValue 是折算成 ccy 的价值
   const txD = x => conv(x.type === 'transfer' && x.value != null ? +x.value : +x.amount || 0, x.ccy || S().ccy);
-  const feeD = x => (x.type === 'transfer' && x.fee > 0 ? conv(x.feeValue != null ? +x.feeValue : +x.fee, x.feeCcy || x.ccy || S().ccy) : 0) + Math.max(0, -recvD(x));
+  const feeD = x => (x.type === 'transfer' && !x.trade && x.fee > 0 ? conv(x.feeValue != null ? +x.feeValue : +x.fee, x.feeCcy || x.ccy || S().ccy) : 0) + Math.max(0, -recvD(x));
   /** 同币种转账到账 ≠ 转出：正 = 红包 / 优惠（计收入），负 = 到账扣费（计支出，并入手续费） */
   const recvD = x => (x.type === 'transfer' && x.recvDiff ? conv(+x.recvDiff, x.toCcy || x.ccy || S().ccy) : 0);
   const bonusD = x => Math.max(0, recvD(x));
@@ -1191,9 +1191,9 @@
   function tradeTags(x) {
     const sell = x.trade === 'sell', q = sell ? x.amount : x.toAmount, u = sell ? x.fromUnit : x.toUnit, pc = sell ? x.ccy : x.toCcy;
     const cu = sell ? x.toUnit : x.fromUnit, cc = sell ? x.toCcy : x.ccy, tot = sell ? x.toAmount : x.amount;
-    const px = hidden() ? MASK : money(+x.tradePx || 0, { ccy: pc, max: pxMax(x.tradePx), raw: true });
+    const px = hidden() ? MASK : money(+x.tradePx || 0, { ccy: x.tradePxCcy || pc, max: pxMax(x.tradePx), raw: true });
     return `<small>${qtyTxt(q, u, pc)} @ ${px}</small><small>${t(sell ? 'tradeRecvS' : 'tradePayS')} ${qtyTxt(tot, cu, cc)}</small>`
-      + (x.tradeFee > 0 ? `<small class="dim">${t('fee')} ${qtyTxt(x.tradeFee, cu, cc)}</small>` : '')
+      + (x.tradeFee > 0 ? `<small class="dim">${t('fee')} ${x.feeId ? feeTxt(x) : qtyTxt(x.tradeFee, cu, cc)}</small>` : '')
       + (sell && x.realized != null ? `<small class="${upDown(+x.realized)}">${t('realized')} ${money(+x.realized, { ccy: x.realizedCcy || x.ccy, sign: true })}${+x.costBasis ? ` (${pct((x.realized / Math.abs(x.costBasis)) * 100)})` : ''}</small>` : '');
   }
   /** 手续费显示：单独的手续费账户按它自己的数量 / 币种显示（如 0.0012 BNB） */
@@ -2214,6 +2214,46 @@
   }
   const colBtnHTML = tid => `<button class="btn btn-glass sm col-btn" data-action="cols" data-v="${tid}" title="${t('colSettings')}">${ic('sliders')}${t('colSettings')}</button>`;
   /* ---- 资产明细的列 ---- */
+  /** 改成买卖之前的原转账：保存在 preTrade；v8.6 改的没有保存，从这条记录的修改记录里还原 */
+  function preTradeOf(x) {
+    if (!x || !x.trade) return null;
+    if (x.preTrade) return x.preTrade;
+    const lg = (x.log || []).slice().reverse().find(e => e.act === 'edit' && (e.diffs || []).some(d => d[0] === 'trade' && !d[1] && d[2]));
+    if (!lg) return null;
+    const o = JSON.parse(JSON.stringify(x));
+    ['log', 'preTrade', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
+    lg.diffs.forEach(([k, a]) => { if (a === '' || a == null) delete o[k]; else o[k] = a; });
+    const f = findAsset(o.accountId), to = findAsset(o.toId);
+    if (!f || !to || o.type !== 'transfer') return null;
+    const fa = o.feeId ? findAsset(o.feeId) : f, fu = qtyUnit(f), tu = qtyUnit(to);
+    o.ccy = aCcy(f); o.toCcy = aCcy(to); o.fee = +o.fee || 0; o.applied = true;
+    if (fu) o.fromUnit = fu;
+    if (tu) o.toUnit = tu;
+    if (o.feeId && fa) { o.feeCcy = aCcy(fa); if (qtyUnit(fa)) o.feeUnit = qtyUnit(fa); }
+    o.value = round8((+o.amount || 0) * (fu ? (x.trade === 'sell' && +x.tradePx > 0 && !x.tradePxCcy ? +x.tradePx : unitPx(f)) : 1));
+    o.feeValue = round8(o.fee * unitPx(fa));
+    if (tu) o.inCost = round8(conv(fu ? o.amount * (+f.cost || 0) : o.amount, aCcy(f), aCcy(to)));
+    if (!fu && !tu && aCcy(f) === aCcy(to) && Math.abs((+o.toAmount || 0) - (+o.amount || 0)) > 1e-9) o.recvDiff = round8(o.toAmount - o.amount);
+    return o;
+  }
+  /** 撤回「改成买入 / 卖出」：恢复成原来的普通转账，数量和余额按原记录重新计算 */
+  async function restorePreTrade(x) {
+    const pre = preTradeOf(x); if (!pre) return;
+    const q = (n, u, c) => (u ? `${trim8(n)} ${esc(u)}` : money(n, { ccy: c, max: 8, raw: true }));
+    const fee = +pre.fee > 0 ? ` · ${t('fee')} ${q(+pre.fee, pre.feeId ? pre.feeUnit : pre.fromUnit, pre.feeCcy || pre.ccy)}${pre.feeId && !pre.feeUnit ? ' (' + esc(acctName(pre.feeId)) + ')' : ''}` : '';
+    const desc = `${esc(acctName(pre.accountId))} → ${esc(acctName(pre.toId))} ${q(+pre.amount, pre.fromUnit, pre.ccy)}${t('tradeUndoTo')}${q(+pre.toAmount, pre.toUnit, pre.toCcy)}${fee}`;
+    if (!(await confirmDialog({ title: t('tradeUndoT'), msg: t('tradeUndoM', { d: desc }), ok: t('tradeUndo') }))) return;
+    const old = JSON.parse(JSON.stringify(x)), bal0 = balSnapshot();
+    applyTx(x, -1);
+    Object.keys(x).forEach(k => { if (!['id', 'createdAt', 'log'].includes(k)) delete x[k]; });
+    const p = JSON.parse(JSON.stringify(pre));
+    ['id', 'createdAt', 'log', 'preTrade'].forEach(k => delete p[k]);
+    Object.assign(x, p);
+    applyTx(x, 1);
+    const d = diffOf(old, x, TX_FIELDS); if (d.length) logOp('tx', x, 'edit', d);
+    logBalChanges(bal0, x, 'edit');
+    commit(); closeModal(); renderAll(); toast(t('tradeUndone'), 'ok');
+  }
   /** 每项资产累计的已实现盈亏（显示币种），来自卖出记录 */
   function realMap() { const mp = {}; DB.txs.forEach(x => { if (x.trade === 'sell' && x.realized != null) mp[x.accountId] = (mp[x.accountId] || 0) + realD(x); }); return mp; }
   /** 收益概览：未实现 + 已实现 + 分红利息（收入「投资收益」）= 总收益；按当前类别筛选 */
@@ -3735,9 +3775,11 @@
           <div class="field"><label id="tr-px-l"></label><input class="input num" id="tr-px" inputmode="decimal" autocomplete="off" placeholder="0.00"></div>
         </div>
         <div class="row2">
+          <div class="field"><label>${t('feeAcct')}</label><select class="input" id="tr-fee-acct">${balOptions(st.trade ? st.feeId || '' : '', t('tradeFeeSame'))}</select></div>
           <div class="field"><label id="tr-fee-l"></label><input class="input num" id="tr-fee" inputmode="decimal" autocomplete="off" placeholder="0.00"></div>
-          <div class="field"><label id="tr-tot-l"></label><input class="input num" id="tr-tot" inputmode="decimal" autocomplete="off" placeholder="0.00"><div class="recv-diff" id="tr-tot-h"></div></div>
         </div>
+        <div class="hint" id="tr-fee-h" style="margin:-6px 0 12px"></div>
+        <div class="field"><label id="tr-tot-l"></label><input class="input num" id="tr-tot" inputmode="decimal" autocomplete="off" placeholder="0.00"><div class="recv-diff" id="tr-tot-h"></div></div>
         <div class="tr-prev" id="tr-prev"></div>
       </div>
       <div class="hint" id="tf-val-hint" style="display:none;margin:-6px 0 12px"></div>
@@ -3769,7 +3811,7 @@
     openModal({
       title: ex ? t('txEdit') : t('txNew'),
       body,
-      footer: `${ex ? `<span class="foot-meta">${t('createdAt')} ${fullTime(ex.createdAt)}</span>` : ''}<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" id="tf-save">${ic('check')}${t('save')}</button>`,
+      footer: `${ex ? `<span class="foot-meta">${t('createdAt')} ${fullTime(ex.createdAt)}</span>` : ''}${ex && preTradeOf(ex) ? `<button class="btn btn-glass" id="tf-undo-trade" title="${t('tradeUndoTip')}">${ic('repeat')}${t('tradeUndo')}</button>` : ''}<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" id="tf-save">${ic('check')}${t('save')}</button>`,
       onMount(m) {
         const curCcy = () => { const v = $('#tf-ccy', m).value; return v === '__other' ? $('#tf-ccy-other', m).value.trim().toUpperCase() : v; };
         const drawCats = () => {
@@ -3872,45 +3914,54 @@
         /** 卖出部分的单位成本：编辑已有卖出时沿用当时的成本，避免之后的买入改变这笔的已实现盈亏 */
         const sellCostPU = f => (ex && ex.trade === 'sell' && ex.accountId === f.id && +ex.amount > 0 && ex.costBasis != null ? +ex.costBasis / +ex.amount : baseHold(f).c);
         const trNum = id => { const v = $(id, m).value.replace(/[,\s]/g, ''); return v === '' ? 0 : /^\d*\.?\d{0,8}$/.test(v) ? parseNum(v) : NaN; };
+        /** 成交价的计价币种：投资资产按它自己的币种；现金 / 余额类（USDT 余额、外币账户）按付款 / 到账账户的币种报价（相当于汇率） */
+        const pxCcyOf = (inv, cash) => (inv && cash && isBalance(inv) ? aCcy(cash) : inv ? aCcy(inv) : '');
+        const unitLbl = a => (a ? qtyUnit(a) || (isBalance(a) ? a.code || aCcy(a) : '') : '');
+        /** 方向反了：从现金类「卖出」成投资资产 / 从投资资产「买入」现金类 */
+        const badDir = (inv, cash) => !!(inv && cash && isBalance(inv) && !isBalance(cash));
         const tradeCalc = () => {
           const A = trAssets(), qty = trNum('#tr-qty') || 0, px = trNum('#tr-px') || 0, fee = trNum('#tr-fee') || 0, tot = trNum('#tr-tot') || 0;
-          const cpx = A.cash ? (A.isNew && A.cash === A.to && !isBalance(A.cash) ? 0 : unitPx(A.cash)) : 0;
-          const gross = A.inv && A.cash && cpx > 0 ? round8(conv(qty * px, aCcy(A.inv), aCcy(A.cash)) / cpx) : 0;
-          return Object.assign(A, { qty, px, fee, tot, cpx, gross, totInv: A.inv && A.cash ? conv(tot * cpx, aCcy(A.cash), aCcy(A.inv)) : 0 });
+          const cpx = A.cash ? (A.isNew && A.cash === A.to && !isBalance(A.cash) ? 0 : unitPx(A.cash)) : 0, pc = pxCcyOf(A.inv, A.cash);
+          const gross = A.inv && A.cash && cpx > 0 ? round8(conv(qty * px, pc, aCcy(A.cash)) / cpx) : 0;
+          // 手续费账户：默认从付款 / 到账账户扣（并进到账 / 付款金额）；选了别的资产（如 BNB、股票本身）就单独从那里扣
+          const fid = $('#tr-fee-acct', m).value, fa0 = fid ? findAsset(fid) : null, feeSep = !!(fa0 && A.cash && fa0.id !== A.cash.id);
+          const fa = feeSep ? fa0 : null, feeInvV = fa && A.inv ? conv(fee * unitPx(fa), aCcy(fa), aCcy(A.inv)) : 0;
+          return Object.assign(A, { qty, px, fee, tot, cpx, pc, gross, fa, feeSep, feeInvV, totInv: A.inv && A.cash ? conv(tot * cpx, aCcy(A.cash), aCcy(A.inv)) : 0 });
         };
-        const autoTot = c => (c.gross > 0 ? round8(Math.max(0, trade === 'sell' ? c.gross - c.fee : c.gross + c.fee)) : 0);
-        /** 切换模式：普通 ⇄ 买卖时把已填的数量 / 金额带过去；编辑旧转账改成买卖时按原记录推算成交价 */
+        const autoTot = c => { const mf = c.feeSep ? 0 : c.fee; return c.gross > 0 ? round8(Math.max(0, trade === 'sell' ? c.gross - mf : c.gross + mf)) : 0; };
+        const setF = (id, n) => { $(id, m).value = n > 0 ? trim8(round8(n)) : ''; };
+        /** 切换模式：普通 ⇄ 买卖时把已填的数量 / 金额 / 手续费带过去；编辑旧转账改成买卖时按原记录推算成交价 */
         const setTrade = v => {
           if (v === trade) return;
           const prev = trade, amtEl = $('#tf-amount', m), recvEl = $('#tf-recv', m);
-          const setF = (id, n) => { $(id, m).value = n > 0 ? trim8(round8(n)) : ''; };
           if (prev && !v) {
             const c = tradeCalc(), sell = prev === 'sell';
-            setF('#tf-amount', sell ? c.qty : c.tot); setF('#tf-recv', sell ? c.tot : c.qty); $('#tf-fee', m).value = '';
+            setF('#tf-amount', sell ? c.qty : c.tot); setF('#tf-recv', sell ? c.tot : c.qty);
+            if (c.feeSep && c.fee > 0) { $('#tf-fee-acct', m).value = c.fa.id === $('#tf-acct', m).value ? '' : c.fa.id; setF('#tf-fee', c.fee); }
+            else { $('#tf-fee-acct', m).value = ''; $('#tf-fee', m).value = ''; }
             recvTouched = !!recvEl.value; trade = v; return;
           }
           trade = v;
           // 转入「新建资产」：卖出默认建现金账户，买入默认建股票
           if (v && $('#tf-to', m).value === '__new') { const cl = $('#tn-cls', m), bal = isBalance(draftAsset()); if (v === 'sell' && !bal) cl.value = 'cash'; if (v === 'buy' && bal) cl.value = 'stock'; }
           ['#tr-qty', '#tr-px', '#tr-fee', '#tr-tot'].forEach(id => { $(id, m).value = ''; });
+          $('#tr-fee-acct', m).value = '';
           totTouched = false;
-          if (!v) return;
-          if (!prev) {
-            const amt = parseNum(amtEl.value) || 0, rv = recvTouched || (ex && ex.type === 'transfer') ? parseNum(recvEl.value) || 0 : 0;
-            const fa = $('#tf-fee-acct', m).value, fee0 = !fa || fa === $('#tf-acct', m).value ? parseNum($('#tf-fee', m).value) || 0 : 0;
-            const sell = v === 'sell', q = sell ? amt : rv, tot = sell ? rv : (amt > 0 ? amt + fee0 : 0);
-            setF('#tr-qty', q); setF('#tr-tot', tot);
-            if (!sell && fee0 > 0 && amt > 0) setF('#tr-fee', fee0);
-            const c = tradeCalc();
-            if (q > 0 && tot > 0 && c.inv && c.cash && c.cpx > 0) {
-              setF('#tr-px', conv((sell ? tot : tot - fee0) * c.cpx, aCcy(c.cash), aCcy(c.inv)) / q);
-              totTouched = true;
-            }
-          }
+          if (!v || prev) return;
+          const amt = parseNum(amtEl.value) || 0, rv = recvTouched || (ex && ex.type === 'transfer') ? parseNum(recvEl.value) || 0 : 0;
+          const fee0 = parseNum($('#tf-fee', m).value) || 0, fsel = $('#tf-fee-acct', m).value || $('#tf-acct', m).value;
+          const A = trAssets(), sep = fee0 > 0 && !!fsel && (!A.cash || fsel !== A.cash.id), mf = sep ? 0 : fee0;   // 原手续费不是从付款 / 到账账户扣的 → 保留成单独的手续费账户
+          if (sep) $('#tr-fee-acct', m).value = fsel;
+          if (fee0 > 0) setF('#tr-fee', fee0);
+          const sell = v === 'sell', q = sell ? amt : rv, tot = sell ? (rv > 0 ? rv - mf : 0) : (amt > 0 ? amt + mf : 0), grossC = sell ? rv : amt;
+          setF('#tr-qty', q); setF('#tr-tot', tot);
+          const c = tradeCalc();
+          if (q > 0 && grossC > 0 && c.inv && c.cash && c.cpx > 0) { setF('#tr-px', conv(grossC * c.cpx, aCcy(c.cash), c.pc) / q); totTouched = tot > 0; }
         };
         if (trade && ex) {
-          const sell = trade === 'sell', setF = (id, n) => { $(id, m).value = n > 0 ? trim8(round8(n)) : ''; };
+          const sell = trade === 'sell';
           setF('#tr-qty', sell ? ex.amount : ex.toAmount); setF('#tr-px', ex.tradePx); setF('#tr-fee', ex.tradeFee); setF('#tr-tot', sell ? ex.toAmount : ex.amount);
+          $('#tr-fee-acct', m).value = ex.feeId || '';
         }
         /** 新记录：从投资资产转到现金类 → 卖出；从现金类转到投资资产 → 买入（手动点过就不再自动切换） */
         const autoTrade = () => {
@@ -3931,41 +3982,50 @@
           if (!on) return;
           const sell = trade === 'sell';
           let c = tradeCalc();
-          const { inv, cash } = c, invNew = c.isNew && inv === c.to;
-          const iu = inv && !isBalance(inv) ? qtyUnit(inv) : '', cu = cash ? qtyUnit(cash) : '';
+          const { inv, cash } = c, invNew = c.isNew && inv === c.to, invBal = inv && isBalance(inv);
+          const iu = unitLbl(inv), cu = cash ? qtyUnit(cash) : '', fu = c.fa ? qtyUnit(c.fa) : '';
           $('#tr-qty-l', m).innerHTML = `${t(sell ? 'tradeSellQty' : 'tradeBuyQty')}${iu ? ` (${esc(iu)})` : ''}`;
-          $('#tr-px-l', m).innerHTML = `${t(sell ? 'tradeSellPx' : 'tradeBuyPx')}${inv ? ` (${esc(aCcy(inv))}${iu ? '/' + esc(iu) : ''})` : ''} <span class="dim">· ${t('tradeAvgPx')}</span>`;
-          $('#tr-fee-l', m).innerHTML = `${t('fee')}${cash ? ` (${esc(cu || aCcy(cash))})` : ''} <span class="dim">· ${t('codeOpt')}</span>`;
+          $('#tr-px-l', m).innerHTML = `${t(sell ? 'tradeSellPx' : 'tradeBuyPx')}${inv && c.pc ? ` (${esc(c.pc)}${iu ? '/' + esc(iu) : ''})` : ''} <span class="dim">· ${t('tradeAvgPx')}</span>`;
+          $('#tr-fee-l', m).innerHTML = `${t('fee')}${c.fa ? ` (${esc(fu || aCcy(c.fa))})` : cash ? ` (${esc(cu || aCcy(cash))})` : ''} <span class="dim">· ${t('codeOpt')}</span>`;
           $('#tr-tot-l', m).innerHTML = `${t(sell ? 'tradeRecv' : 'tradePay')}${cash ? ` (${esc(cu || aCcy(cash))})` : ''}`;
-          $('#tr-px', m).placeholder = inv && +inv.price > 0 && !invNew ? trim8(round8(+inv.price)) : '0.00';
-          $('#tr-all', m).style.display = sell && inv && !isBalance(inv) ? '' : 'none';
+          const pxRef = inv && !invNew ? (invBal ? (cash ? conv(1, aCcy(inv), aCcy(cash)) : 0) : +inv.price || 0) : 0;
+          $('#tr-px', m).placeholder = pxRef > 0 ? trim8(round8(pxRef)) : '0.00';
+          $('#tr-all', m).style.display = sell && inv ? '' : 'none';
+          $('#tr-fee-h', m).innerHTML = c.fa ? t('tradeFeeOther', { n: esc(c.fa.name), h: fu ? `${trim8(+c.fa.qty || 0)} ${esc(fu)}` : money(+c.fa.qty || 0, { ccy: aCcy(c.fa), raw: true }) }) : '';
           if (!totTouched) { const a = autoTot(c); $('#tr-tot', m).value = a > 0 ? trim8(a) : ''; c = tradeCalc(); }
           const fc = n => (cu ? `${trim8(round8(n))} ${esc(cu)}` : money(n, { ccy: aCcy(cash), max: 2, raw: true }));
           const fi = (n, o) => money(n, Object.assign({ ccy: aCcy(inv), max: 2, raw: true }, o));
+          const fq = n => (invBal ? money(n, { ccy: aCcy(inv), max: 8, raw: true }) : `${trim8(round8(n))} ${esc(iu)}`);
           const th = $('#tr-tot-h', m), at = autoTot(c);
           th.className = 'recv-diff'; th.innerHTML = '';
           if (totTouched && at > 0 && Math.abs(at - c.tot) > 1e-8) th.innerHTML = `${t('tradeCalcV', { v: fc(at) })} <a href="#" id="tr-reset">${t('tradeUseCalc')}</a>`;
           const hb = $('#tr-hold', m), pv = $('#tr-prev', m);
-          if (inv && !invNew && !isBalance(inv)) {
+          if (inv && !invNew) {
             const h = baseHold(inv), cpu = sell ? sellCostPU(inv) : h.c;
             hb.style.display = '';
-            hb.innerHTML = `<span>${t('tradeHold')} <b class="num">${trim8(h.q)} ${esc(iu)}</b></span><span>${t('tradeAvgCost')} <b class="num">${fi(cpu, { max: pxMax(cpu) })}</b></span><span>${t('colPrice')} <b class="num">${fi(+inv.price || 0, { max: pxMax(+inv.price) })}</b></span>`;
+            hb.innerHTML = `<span>${t('tradeHold')} <b class="num">${fq(h.q)}</b></span>` + (invBal ? '' : `<span>${t('tradeAvgCost')} <b class="num">${fi(cpu, { max: pxMax(cpu) })}</b></span><span>${t('colPrice')} <b class="num">${fi(+inv.price || 0, { max: pxMax(+inv.price) })}</b></span>`);
           } else hb.style.display = 'none';
           const row = (l, v, cls) => `<div class="tr-r"><span>${l}</span><b class="num ${cls || ''}">${v}</b></div>`;
           const rows = [];
           if (!inv || !cash) { pv.innerHTML = ''; pv.style.display = 'none'; return; }
-          if (isBalance(inv)) rows.push(`<div class="tr-warn">${t(sell ? 'errSellInv' : 'errBuyInv')}</div>`);
+          if (badDir(inv, cash)) rows.push(`<div class="tr-warn">${t(sell ? 'errSellInv' : 'errBuyInv')}</div>`);
           else if (c.qty > 0 && (c.px > 0 || c.tot > 0)) {
             if (c.gross > 0) rows.push(row(t('tradeGross'), fc(c.gross)));
+            const feeInv = c.fa && c.fa.id === inv.id ? c.fee : 0;   // 手续费直接从这项资产里扣（如用股票 / 币本身付手续费）
             if (sell) {
-              const h = baseHold(inv), cb = c.qty * sellCostPU(inv), rl = c.totInv - cb, left = round8(h.q - c.qty);
-              rows.push(row(t('tradeCostPart'), fi(cb)));
-              if (c.tot > 0) rows.push(row(t('realized'), `${fi(rl, { sign: true })} <small>(${pct(cb ? (rl / Math.abs(cb)) * 100 : 0)})</small>`, upDown(rl)));
-              rows.push(left < -1e-9 ? `<div class="tr-warn">${t('errTransferQty', { q: `${trim8(h.q)} ${esc(iu)}` })}</div>`
-                : row(t('tradeAfter'), left > 1e-9 ? t('tradeLeft', { q: `${trim8(left)} ${esc(iu)}` }) : t('tradeCleared')));
+              const h = baseHold(inv), left = round8(h.q - c.qty - feeInv);
+              if (!invBal) {
+                const cb = c.qty * sellCostPU(inv), rl = c.totInv - c.feeInvV - cb;
+                rows.push(row(t('tradeCostPart'), fi(cb)));
+                if (c.tot > 0) rows.push(row(t('realized'), `${fi(rl, { sign: true })} <small>(${pct(cb ? (rl / Math.abs(cb)) * 100 : 0)})</small>`, upDown(rl)));
+              } else rows.push(row(t('realized'), t('tradeNoPnl')));
+              rows.push(left < -1e-9 ? `<div class="tr-warn">${t('errTransferQty', { q: fq(h.q) })}</div>`
+                : row(t('tradeAfter'), left > 1e-9 ? (invBal ? t('tradeLeftBal', { q: fq(left) }) : t('tradeLeft', { q: fq(left) })) : t('tradeCleared')));
             } else {
-              const h = invNew ? { q: 0, c: 0 } : baseHold(inv), nq = round8(h.q + c.qty), nc = nq > 0 ? (h.q * h.c + c.totInv) / nq : 0;
-              if (c.tot > 0) rows.push(row(t('tradeAfter'), `${trim8(nq)} ${esc(iu)} · ${t('tradeAvgCost')} ${fi(nc, { max: pxMax(nc) })}${h.q > 1e-9 ? ` <small class="dim">(${fi(h.c, { max: pxMax(h.c) })} →)</small>` : ''}`));
+              // 和实际记账顺序一致：先扣手续费（若从这项资产扣），再按买入摊薄平均成本
+              const h = invNew ? { q: 0, c: 0 } : baseHold(inv), q0 = h.q - feeInv, nq = round8(q0 + c.qty);
+              const nc = nq > 0 ? (q0 * h.c + c.totInv + c.feeInvV) / nq : 0;
+              if (c.tot > 0) rows.push(row(t('tradeAfter'), invBal ? `${t('tradeHold')} ${fq(nq)}` : `${fq(nq)} · ${t('tradeAvgCost')} ${fi(nc, { max: pxMax(nc) })}${h.q > 1e-9 ? ` <small class="dim">(${fi(h.c, { max: pxMax(h.c) })} →)</small>` : ''}`));
             }
           }
           pv.innerHTML = rows.join(''); pv.style.display = rows.length ? '' : 'none';
@@ -4049,11 +4109,18 @@
         $('#tf-amount', m).addEventListener('input', trSync);
         $('#tf-trade', m).addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; tradeTouched = true; setTrade(b.dataset.v); trSync(); });
         ['#tr-qty', '#tr-px', '#tr-fee'].forEach(id => $(id, m).addEventListener('input', () => { totTouched = false; tradeSync(); }));
+        $('#tr-fee-acct', m).addEventListener('change', () => { totTouched = false; tradeSync(); });
         $('#tr-tot', m).addEventListener('input', () => { totTouched = true; tradeSync(); });
-        $('#tr-all', m).addEventListener('click', () => { const c = tradeCalc(); if (!c.inv) return; $('#tr-qty', m).value = trim8(baseHold(c.inv).q); totTouched = false; tradeSync(); });
+        $('#tr-all', m).addEventListener('click', () => {
+          const c = tradeCalc(); if (!c.inv) return;
+          const feeInv = c.fa && c.fa.id === c.inv.id ? c.fee : 0;
+          setF('#tr-qty', Math.max(0, baseHold(c.inv).q - feeInv)); totTouched = false; tradeSync();
+        });
         $('#tr-wrap', m).addEventListener('click', e => { if (e.target.id !== 'tr-reset') return; e.preventDefault(); totTouched = false; tradeSync(); });
         ['#tr-qty', '#tr-px', '#tr-fee', '#tr-tot'].forEach(id => $(id, m).addEventListener('keydown', e => { if (e.key === 'Enter') $('#tf-save', m).click(); }));
-        /** 保存买卖：卖出 amount = 卖出数量、toAmount = 实际到账；买入 amount = 付款金额（含手续费，计入成本）、toAmount = 买入数量 */
+        const undoBtn = $('#tf-undo-trade', m);
+        if (undoBtn) undoBtn.addEventListener('click', () => restorePreTrade(ex));
+        /** 保存买卖：卖出 amount = 卖出数量、toAmount = 实际到账；买入 amount = 付款金额、toAmount = 买入数量。手续费计入成本 / 已实现盈亏 */
         const saveTrade = () => {
           const date = $('#tf-date', m).value;
           if (!date) { toast(t('errDate'), 'err'); return; }
@@ -4062,36 +4129,42 @@
           if (!f || !to) { toast(t('errTransferAcct'), 'err'); return; }
           if (isNew && !to.code && !to.name) { toast(t('errNeedName'), 'err'); $('#tn-code', m).focus(); return; }
           if (!isNew && f.id === to.id) { toast(t('errTransferSame'), 'err'); return; }
-          if (isBalance(sell ? f : to)) { toast(t(sell ? 'errSellInv' : 'errBuyInv'), 'err'); return; }
+          if (badDir(sell ? f : to, sell ? to : f)) { toast(t(sell ? 'errSellInv' : 'errBuyInv'), 'err'); return; }
           const bad = (id, k) => { toast(t(k), 'err'); $(id, m).focus(); };
           const qty = trNum('#tr-qty'), px = trNum('#tr-px'), fee = trNum('#tr-fee'), tot = trNum('#tr-tot');
           if (!(qty > 0)) return bad('#tr-qty', 'errTradeQty');
           if (!(px > 0)) return bad('#tr-px', 'errTradePx');
           if (isNaN(fee) || fee < 0) return bad('#tr-fee', 'errAmount');
           if (!(tot > 0)) return bad('#tr-tot', sell ? 'errRecv' : 'errAmount');
+          const fid = $('#tr-fee-acct', m).value;
+          let fa = fid && fee > 0 ? findAsset(fid) : null;
+          const cash0 = sell ? to : f;
+          if (fa && !isNew && fa.id === cash0.id) fa = null;   // 选的就是付款 / 到账账户 → 并进金额
           if (isNew) {
             to = Object.assign({ id: uid(), createdAt: Date.now(), updatedAt: Date.now() }, to);
-            if (!isBalance(to)) to.price = sell ? round8(conv(qty * px, aCcy(f), aCcy(to)) / (tot + fee)) : px;   // 新资产的单价按这笔成交价
+            if (!isBalance(to)) to.price = sell ? round8(conv(qty * px, aCcy(f), aCcy(to)) / (tot + (fa ? 0 : fee))) : px;   // 新资产的单价按这笔成交价
           }
-          const inv = sell ? f : to, cash = sell ? to : f, cpx = unitPx(cash);
+          const inv = sell ? f : to, cash = sell ? to : f, cpx = unitPx(cash), pc = pxCcyOf(inv, cash), invBal = isBalance(inv);
           if (!(cpx > 0)) { toast(t('errTradeNoPx', { n: cash.name || cash.code }), 'err'); return; }
-          const totV = round8(tot * cpx), totInv = conv(totV, aCcy(cash), aCcy(inv));
-          const costPU = sell ? sellCostPU(f) : 0;
+          const totV = round8(tot * cpx), totInv = conv(totV, aCcy(cash), aCcy(inv)), feeInvV = fa ? conv(fee * unitPx(fa), aCcy(fa), aCcy(inv)) : 0;
+          const costPU = sell && !invBal ? sellCostPU(f) : 0;
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
+          // 改成买卖之前的原记录（普通转账），用于「撤回」
+          const pre = ex ? (ex.trade ? ex.preTrade || null : ex.type === 'transfer' ? (({ log, preTrade, ...r }) => r)(old) : null) : null;
           if (ex) applyTx(ex, -1);
-          const fu = qtyUnit(f), tu = qtyUnit(to), outQ = sell ? qty : tot;
-          if (fu && outQ > (+f.qty || 0) + 1e-9) {
-            const hq = trim8(+f.qty || 0);
-            if (ex) applyTx(ex, 1);
-            toast(t('errTransferQty', { q: `${hq} ${fu}` }), 'err'); return;
-          }
+          const fu = qtyUnit(f), tu = qtyUnit(to), outQ = sell ? qty : tot, feeFromF = fa && fa.id === f.id ? fee : 0;
+          const undo = () => { if (ex) applyTx(ex, 1); };
+          if (fu && outQ + feeFromF > (+f.qty || 0) + 1e-9) { const hq = trim8(+f.qty || 0); undo(); toast(t('errTransferQty', { q: `${hq} ${fu}` }), 'err'); return; }
+          if (fa && fa.id !== f.id && qtyUnit(fa) && fee > (+fa.qty || 0) + 1e-9) { const hq = trim8(+fa.qty || 0); undo(); toast(t('errFeeQty', { n: fa.name, q: `${hq} ${qtyUnit(fa)}` }), 'err'); return; }
           Object.keys(tx).forEach(k => { if (!['id', 'createdAt', 'log'].includes(k)) delete tx[k]; });
           Object.assign(tx, { date, type: 'transfer', cat: 'transfer', trade, amount: round8(outQ), ccy: aCcy(f), accountId: f.id, toId: to.id, toAmount: round8(sell ? tot : qty), toCcy: aCcy(to),
-            fee: 0, value: sell ? round8(qty * px) : totV, feeValue: 0, tradePx: px, tradeFee: fee, tradeCls: primary(inv), note: $('#tf-note', m).value.trim(), applied: true });
+            fee: fa ? fee : 0, value: sell ? round8(invBal ? qty : qty * px) : totV, feeValue: fa ? round8(fee * unitPx(fa)) : 0, tradePx: px, tradePxCcy: pc, tradeFee: fee, tradeCls: primary(inv), note: $('#tf-note', m).value.trim(), applied: true });
+          if (fa) { tx.feeId = fa.id; tx.feeCcy = aCcy(fa); if (qtyUnit(fa)) tx.feeUnit = qtyUnit(fa); }
           if (fu) tx.fromUnit = fu;
-          if (tu) { tx.toUnit = tu; tx.inCost = round8(sell ? totV : totInv); }
-          if (sell) { tx.costBasis = round8(qty * costPU); tx.realized = round8(totInv - tx.costBasis); tx.realizedCcy = aCcy(f); }
+          if (tu) { tx.toUnit = tu; tx.inCost = round8(sell ? totV : totInv + feeInvV); }
+          if (sell && !invBal) { tx.costBasis = round8(qty * costPU); tx.realized = round8(totInv - feeInvV - tx.costBasis); tx.realizedCcy = aCcy(f); }
+          if (pre) tx.preTrade = pre;
           if (isNew) {
             DB.assets.push(to);
             logOp('asset', to, 'create', ASSET_FIELDS.filter(k => !['locked'].includes(k) && to[k] !== '' && to[k] != null).map(k => [k, '', to[k]]), { tx: recTitle('tx', tx) });
@@ -4102,8 +4175,8 @@
           if (old) { const d = diffOf(old, tx, TX_FIELDS); if (d.length) logOp('tx', tx, 'edit', d); } else logOp('tx', tx, 'create');
           logBalChanges(bal0, tx, old ? 'edit' : 'create');
           commit(); closeModal(); renderAll();
-          const iu = qtyUnit(inv);
-          toast(`${t('trade_' + trade)} · ${inv.name} ${trim8(qty)}${iu ? ' ' + iu : ''} @ ${money(px, { ccy: aCcy(inv), max: pxMax(px), raw: true })}${sell ? ` · ${t('realized')} ${money(tx.realized, { ccy: tx.realizedCcy, sign: true })}` : ''}${isNew ? ' · ' + t('newAssetMade', { n: to.name }) : ''}`, 'ok');
+          const iu = unitLbl(inv);
+          toast(`${t('trade_' + trade)} · ${inv.name} ${trim8(qty)}${iu ? ' ' + iu : ''} @ ${money(px, { ccy: pc, max: pxMax(px), raw: true })}${tx.realized != null ? ` · ${t('realized')} ${money(tx.realized, { ccy: tx.realizedCcy, sign: true })}` : ''}${isNew ? ' · ' + t('newAssetMade', { n: to.name }) : ''}${pre && !(old && old.trade) ? ' · ' + t('tradeUndoHint') : ''}`, 'ok');
           if (isNew && to.source === 'online') refreshOne(to);
         };
         $('#tf-amount', m).addEventListener('input', syncRow);
@@ -4219,7 +4292,7 @@
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           if (ex) applyTx(ex, -1);
-          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy'].forEach(k => delete tx[k]);
+          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
           delete tx.appliedPx; delete tx.appliedCost;
           const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;
@@ -4256,14 +4329,19 @@
       if (!tx.applied) return;
       const f = findAsset(tx.accountId), to = findAsset(tx.toId);
       const fa = tx.feeId ? findAsset(tx.feeId) : null;
-      if (f) f.qty = round8((+f.qty || 0) - ((+tx.amount || 0) + (tx.feeId ? 0 : +tx.fee || 0)) * sign);   // 手续费默认从转出账户扣
-      if (fa) fa.qty = round8((+fa.qty || 0) - (+tx.fee || 0) * sign);                                         // 指定了手续费账户（如 BNB）就从那里扣
-      if (to) {
-        const q = +to.qty || 0, dq = (+tx.toAmount || 0) * sign, nq = q + dq;
-        // 转入非现金资产时同步摊薄 / 还原平均成本：新成本 = (原数量×原成本 + 转入成本) / 新数量
-        if (tx.inCost != null && !isBalance(to) && nq > 1e-12) to.cost = round8((q * (+to.cost || 0) + (+tx.inCost || 0) * sign) / nq);
-        to.qty = round8(nq);
-      }
+      const steps = [
+        () => { if (f) f.qty = round8((+f.qty || 0) - ((+tx.amount || 0) + (tx.feeId ? 0 : +tx.fee || 0)) * sign); },   // 手续费默认从转出账户扣
+        () => { if (fa) fa.qty = round8((+fa.qty || 0) - (+tx.fee || 0) * sign); },                                         // 指定了手续费账户（如 BNB）就从那里扣
+        () => {
+          if (!to) return;
+          const q = +to.qty || 0, dq = (+tx.toAmount || 0) * sign, nq = q + dq;
+          // 转入非现金资产时同步摊薄 / 还原平均成本：新成本 = (原数量×原成本 + 转入成本) / 新数量
+          if (tx.inCost != null && !isBalance(to) && nq > 1e-12) to.cost = round8((q * (+to.cost || 0) + (+tx.inCost || 0) * sign) / nq);
+          to.qty = round8(nq);
+        }
+      ];
+      // 回滚时倒序执行，手续费账户就是转入资产（如买 BTC 手续费扣 BTC）时平均成本也能完全还原
+      (sign < 0 ? steps.reverse() : steps).forEach(fn => fn());
       return;
     }
     if (!tx.applied || !tx.accountId) return;
