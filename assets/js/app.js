@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -238,7 +238,7 @@
   /* ---- 操作记录 ----
      每条资产 / 记账自带 log：[{ts, act, diffs:[[字段, 旧值, 新值]], extra}]
      DB.audit 为全局操作日志（含已删除的记录），最多保留 2000 条 */
-  const ASSET_FIELDS = ['name', 'code', 'cls', 'warehouse', 'ccy', 'qty', 'cost', 'price', 'unit', 'source', 'note', 'locked', 'balMode'];
+  const ASSET_FIELDS = ['name', 'code', 'cls', 'warehouse', 'ccy', 'qty', 'cost', 'price', 'unit', 'source', 'note', 'locked', 'balMode', 'noQty'];
   const TX_FIELDS = ['date', 'type', 'cat', 'trade', 'amount', 'ccy', 'accountId', 'toId', 'toAmount', 'tradePx', 'tradeFee', 'fee', 'feeId', 'subId', 'note'];
   const same = (x, y) => JSON.stringify(x == null ? '' : x) === JSON.stringify(y == null ? '' : y);
   function diffOf(oldR, newR, fields) {
@@ -1192,7 +1192,8 @@
     const sell = x.trade === 'sell', q = sell ? x.amount : x.toAmount, u = sell ? x.fromUnit : x.toUnit, pc = sell ? x.ccy : x.toCcy;
     const cu = sell ? x.toUnit : x.fromUnit, cc = sell ? x.toCcy : x.ccy, tot = sell ? x.toAmount : x.amount;
     const px = hidden() ? MASK : money(+x.tradePx || 0, { ccy: x.tradePxCcy || pc, max: pxMax(x.tradePx), raw: true });
-    return `<small>${qtyTxt(q, u, pc)} @ ${px}</small><small>${t(sell ? 'tradeRecvS' : 'tradePayS')} ${qtyTxt(tot, cu, cc)}</small>`
+    const head = x.tradeMv != null ? `${t(sell ? 'tradeSellMvS' : 'tradeBuyMvS')} ${money(+x.tradeMv, { ccy: pc })}` : `${qtyTxt(q, u, pc)} @ ${px}`;
+    return `<small>${head}</small><small>${t(sell ? 'tradeRecvS' : 'tradePayS')} ${qtyTxt(tot, cu, cc)}</small>`
       + (x.tradeFee > 0 ? `<small class="dim">${t('fee')} ${x.feeId ? feeTxt(x) : qtyTxt(x.tradeFee, cu, cc)}</small>` : '')
       + (sell && x.realized != null ? `<small class="${upDown(+x.realized)}">${t('realized')} ${money(+x.realized, { ccy: x.realizedCcy || x.ccy, sign: true })}${+x.costBasis ? ` (${pct((x.realized / Math.abs(x.costBasis)) * 100)})` : ''}</small>` : '');
   }
@@ -2221,7 +2222,7 @@
     const lg = (x.log || []).slice().reverse().find(e => e.act === 'edit' && (e.diffs || []).some(d => d[0] === 'trade' && !d[1] && d[2]));
     if (!lg) return null;
     const o = JSON.parse(JSON.stringify(x));
-    ['log', 'preTrade', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
+    ['log', 'preTrade', 'tradeMv', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
     lg.diffs.forEach(([k, a]) => { if (a === '' || a == null) delete o[k]; else o[k] = a; });
     const f = findAsset(o.accountId), to = findAsset(o.toId);
     if (!f || !to || o.type !== 'transfer') return null;
@@ -2286,8 +2287,8 @@
       { k: 'cls', label: t('colClass'), th: t('colClass'), td: r => `<div class="tags">${tagHTML(r.a)}</div>` },
       { k: 'wh', label: t('colWh'), th: whFilterHTML(true), tdCls: 'wh', td: r => (r.a.warehouse ? esc(r.a.warehouse) : '<span class="dim">—</span>') },
       { k: 'qty', label: t('colQty'), th: t('colQty'), thCls: 'r', tdCls: 'r num', td: r => `${qtyStr(r.a)}${unitSuffix(r.a)}` },
-      { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: pxMax(conv(+r.a.cost || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: pxMax(+r.a.cost || 0) })}</small>` : ''); } },
-      { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: pxMax(conv(+r.a.price || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: pxMax(+r.a.price || 0) })}</small>` : '') + extTag(r.a) + srcTag(r.a); } },
+      { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); if (isValA(r.a)) return valCostCell(r.a, x); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: pxMax(conv(+r.a.cost || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: pxMax(+r.a.cost || 0) })}</small>` : ''); } },
+      { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); if (isValA(r.a)) return `<span class="dim">${t('byValue')}</span>`; return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: pxMax(conv(+r.a.price || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: pxMax(+r.a.price || 0) })}</small>` : '') + extTag(r.a) + srcTag(r.a); } },
       Object.assign({ k: 'val', label: t('colValue'), tdCls: r => `r num strong ${r.v < 0 ? 'down' : ''}`, td: r => { const x = cc(r); return `${money(r.v, { max: 2 })}${x.orig ? `<small>${money(aVal(r.a), { ccy: x.ccy, max: 2 })}</small>` : ''}`; } }, sortTh('val', t('colValue'))),
       Object.assign({ k: 'day', label: t('colDay'), tdCls: r => `r num ${upDown(r.day)}`, td: r => `${dayCell(r.day, r.dayPct)}${resetDayBtn(r.a, r.day)}` }, sortTh('day', t('colDay'))),
       Object.assign({ k: 'pnl', label: t('colPnl'), tdCls: r => `r num ${isBalance(r.a) ? 'dim' : upDown(r.pnl)}`, td: r => { if (isBalance(r.a)) return t('noPnl'); const c = aCostD(r.a); return `${money(r.pnl, { sign: true })}<small class="${upDown(r.pnl)}">${pct(c ? (r.pnl / Math.abs(c)) * 100 : 0)}</small>`; } }, sortTh('pnl', t('colPnl'))),
@@ -2322,8 +2323,8 @@
               ${RM[a.id] ? `<div class="p num ${upDown(RM[a.id])}">${t('realized')} ${money(RM[a.id], { sign: true })}</div>` : ''}</div></div>
           <div class="hc-grid">
             <div><div class="l">${bal ? t('cashBalance') : t('colQty')}</div><div class="x num">${qtyStr(a)}${unitSuffix(a)}</div></div>
-            <div><div class="l">${t('colCost')}</div><div class="x num">${bal ? '—' : money(conv(+a.cost || 0, aCcy(a)), { max: 8 })}</div></div>
-            <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : money(conv(+a.price || 0, aCcy(a)), { max: pxMax(conv(+a.price || 0, aCcy(a))) }) + extTag(a) + srcTag(a)}</div></div>
+            <div><div class="l">${isValA(a) ? t('totalCost') : t('colCost')}</div><div class="x num">${bal ? '—' : isValA(a) ? money(aCostD(a)) : money(conv(+a.cost || 0, aCcy(a)), { max: 8 })}</div></div>
+            <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : isValA(a) ? `<span class="dim">${t('byValue')}</span>` : money(conv(+a.price || 0, aCcy(a)), { max: pxMax(conv(+a.price || 0, aCcy(a))) }) + extTag(a) + srcTag(a)}</div></div>
           </div>
           ${a.warehouse ? `<div class="hc-wh">${ic('db')}${esc(a.warehouse)}</div>` : ''}
           ${H.batch ? '' : `<div class="hc-ops">${histBtn('asset', a.id)}${quickBtn(a)}<button class="op edit" data-action="edit-asset" data-id="${a.id}">${ic('edit')}${t('edit')}</button><button class="op del" data-action="del-asset" data-id="${a.id}">${ic('trash')}${t('del')}</button></div>`}
@@ -2365,6 +2366,9 @@
   /** 今日盈亏单元格：没有变化显示 — */
   const dayCell = (ch, p, inline) => (Math.abs(ch) < 0.005 ? '<span class="dim">—</span>'
     : inline ? `${money(ch, { sign: true })} (${pct(p)})` : `${money(ch, { sign: true })}<small class="${upDown(ch)}">${pct(p)}</small>`);
+  /** 按市值记的资产（不填数量）：成本列显示总成本，单价列显示「按市值」 */
+  const isValA = a => !!(a && a.noQty && !isBalance(a));
+  const valCostCell = (a, x) => `${money(aCostD(a))}<small>${t('totalCost')}</small>`;
   const unitSuffix = a => (a.unit && !isBalance(a) && !a.noQty ? ` <span class="dim">${esc(unitLabel(a.unit))}</span>` : '');
   const isOnlineSrc = a => a.source === 'online' && Api.canQuote(a);
   /** 行情来源筛选：全部 / 在线同步 / 手动维护（工具栏和表头共用） */
@@ -3725,7 +3729,7 @@
   function balOptions(sel, first, extra, kind) {
     const rec = recentAccts(kind || 'from'), inRec = new Set(rec.map(a => a.id));
     const opt = (a, top) => {
-      const u = qtyUnit(a), amt = hidden() ? MASK : u ? `${trim8(+a.qty || 0)} ${u}` : `${aCcy(a)} ${fmtNum(+a.qty || 0, 0, 2)}`;
+      const u = qtyUnit(a), amt = hidden() ? MASK : isValA(a) ? `${aCcy(a)} ${fmtNum(aVal(a), 0, 2)}` : u ? `${trim8(+a.qty || 0)} ${u}` : `${aCcy(a)} ${fmtNum(+a.qty || 0, 0, 2)}`;
       return `<option value="${a.id}" ${a.id === sel && (top || !inRec.has(a.id)) ? 'selected' : ''}>${esc(a.name)} (${esc(amt)})</option>`;
     };
     return `<option value="">${first || t('pickAcct')}</option>` + (extra || '') + recentGroup(rec, opt) + whGroups().map(gr =>
@@ -3919,14 +3923,18 @@
         const unitLbl = a => (a ? qtyUnit(a) || (isBalance(a) ? a.code || aCcy(a) : '') : '');
         /** 方向反了：从现金类「卖出」成投资资产 / 从投资资产「买入」现金类 */
         const badDir = (inv, cash) => !!(inv && cash && isBalance(inv) && !isBalance(cash));
+        /** 按市值记的资产：填金额，不填数量 / 价格。每份价格 = 当前单价（编辑已有记录时用当时的价格），份数 = 金额 ÷ 每份价格 */
+        const unitPOf = a => (ex && ex.tradeMv != null && (ex.trade === 'sell' ? ex.accountId : ex.toId) === a.id && +ex.tradePx > 0 ? +ex.tradePx : +a.price || 0);
         const tradeCalc = () => {
-          const A = trAssets(), qty = trNum('#tr-qty') || 0, px = trNum('#tr-px') || 0, fee = trNum('#tr-fee') || 0, tot = trNum('#tr-tot') || 0;
+          const A = trAssets(), raw = trNum('#tr-qty') || 0, fee = trNum('#tr-fee') || 0, tot = trNum('#tr-tot') || 0;
+          const vm = isValA(A.inv), up = vm ? unitPOf(A.inv) : 0;
+          const qty = vm ? (up > 0 ? raw / up : 0) : raw, px = vm ? up : trNum('#tr-px') || 0;
           const cpx = A.cash ? (A.isNew && A.cash === A.to && !isBalance(A.cash) ? 0 : unitPx(A.cash)) : 0, pc = pxCcyOf(A.inv, A.cash);
           const gross = A.inv && A.cash && cpx > 0 ? round8(conv(qty * px, pc, aCcy(A.cash)) / cpx) : 0;
           // 手续费账户：默认从付款 / 到账账户扣（并进到账 / 付款金额）；选了别的资产（如 BNB、股票本身）就单独从那里扣
           const fid = $('#tr-fee-acct', m).value, fa0 = fid ? findAsset(fid) : null, feeSep = !!(fa0 && A.cash && fa0.id !== A.cash.id);
           const fa = feeSep ? fa0 : null, feeInvV = fa && A.inv ? conv(fee * unitPx(fa), aCcy(fa), aCcy(A.inv)) : 0;
-          return Object.assign(A, { qty, px, fee, tot, cpx, pc, gross, fa, feeSep, feeInvV, totInv: A.inv && A.cash ? conv(tot * cpx, aCcy(A.cash), aCcy(A.inv)) : 0 });
+          return Object.assign(A, { qty, px, fee, tot, cpx, pc, gross, fa, feeSep, feeInvV, vm, up, mv: vm ? raw : null, totInv: A.inv && A.cash ? conv(tot * cpx, aCcy(A.cash), aCcy(A.inv)) : 0 });
         };
         const autoTot = c => { const mf = c.feeSep ? 0 : c.fee; return c.gross > 0 ? round8(Math.max(0, trade === 'sell' ? c.gross - mf : c.gross + mf)) : 0; };
         const setF = (id, n) => { $(id, m).value = n > 0 ? trim8(round8(n)) : ''; };
@@ -3956,11 +3964,12 @@
           const sell = v === 'sell', q = sell ? amt : rv, tot = sell ? (rv > 0 ? rv - mf : 0) : (amt > 0 ? amt + mf : 0), grossC = sell ? rv : amt;
           setF('#tr-qty', q); setF('#tr-tot', tot);
           const c = tradeCalc();
-          if (q > 0 && grossC > 0 && c.inv && c.cash && c.cpx > 0) { setF('#tr-px', conv(grossC * c.cpx, aCcy(c.cash), c.pc) / q); totTouched = tot > 0; }
+          if (c.vm) { setF('#tr-qty', q * c.up); totTouched = tot > 0; }   // 按市值：数量（份）换成金额
+          else if (q > 0 && grossC > 0 && c.inv && c.cash && c.cpx > 0) { setF('#tr-px', conv(grossC * c.cpx, aCcy(c.cash), c.pc) / q); totTouched = tot > 0; }
         };
         if (trade && ex) {
           const sell = trade === 'sell';
-          setF('#tr-qty', sell ? ex.amount : ex.toAmount); setF('#tr-px', ex.tradePx); setF('#tr-fee', ex.tradeFee); setF('#tr-tot', sell ? ex.toAmount : ex.amount);
+          setF('#tr-qty', ex.tradeMv != null ? ex.tradeMv : sell ? ex.amount : ex.toAmount); setF('#tr-px', ex.tradePx); setF('#tr-fee', ex.tradeFee); setF('#tr-tot', sell ? ex.toAmount : ex.amount);
           $('#tr-fee-acct', m).value = ex.feeId || '';
         }
         /** 新记录：从投资资产转到现金类 → 卖出；从现金类转到投资资产 → 买入（手动点过就不再自动切换） */
@@ -3984,7 +3993,9 @@
           let c = tradeCalc();
           const { inv, cash } = c, invNew = c.isNew && inv === c.to, invBal = inv && isBalance(inv);
           const iu = unitLbl(inv), cu = cash ? qtyUnit(cash) : '', fu = c.fa ? qtyUnit(c.fa) : '';
-          $('#tr-qty-l', m).innerHTML = `${t(sell ? 'tradeSellQty' : 'tradeBuyQty')}${iu ? ` (${esc(iu)})` : ''}`;
+          $('#tr-qty-l', m).innerHTML = c.vm ? `${t(sell ? 'tradeSellMv' : 'tradeBuyMv')} (${esc(aCcy(inv))})` : `${t(sell ? 'tradeSellQty' : 'tradeBuyQty')}${iu ? ` (${esc(iu)})` : ''}`;
+          $('#tr-px', m).closest('.field').style.display = c.vm ? 'none' : '';
+          $('#tr-qty', m).placeholder = c.vm ? '0.00' : '0';
           $('#tr-px-l', m).innerHTML = `${t(sell ? 'tradeSellPx' : 'tradeBuyPx')}${inv && c.pc ? ` (${esc(c.pc)}${iu ? '/' + esc(iu) : ''})` : ''} <span class="dim">· ${t('tradeAvgPx')}</span>`;
           $('#tr-fee-l', m).innerHTML = `${t('fee')}${c.fa ? ` (${esc(fu || aCcy(c.fa))})` : cash ? ` (${esc(cu || aCcy(cash))})` : ''} <span class="dim">· ${t('codeOpt')}</span>`;
           $('#tr-tot-l', m).innerHTML = `${t(sell ? 'tradeRecv' : 'tradePay')}${cash ? ` (${esc(cu || aCcy(cash))})` : ''}`;
@@ -3995,7 +4006,7 @@
           if (!totTouched) { const a = autoTot(c); $('#tr-tot', m).value = a > 0 ? trim8(a) : ''; c = tradeCalc(); }
           const fc = n => (cu ? `${trim8(round8(n))} ${esc(cu)}` : money(n, { ccy: aCcy(cash), max: 2, raw: true }));
           const fi = (n, o) => money(n, Object.assign({ ccy: aCcy(inv), max: 2, raw: true }, o));
-          const fq = n => (invBal ? money(n, { ccy: aCcy(inv), max: 8, raw: true }) : `${trim8(round8(n))} ${esc(iu)}`);
+          const fq = n => (invBal ? money(n, { ccy: aCcy(inv), max: 8, raw: true }) : c.vm ? money(n * (+inv.price || 0), { ccy: aCcy(inv), max: 2, raw: true }) : `${trim8(round8(n))} ${esc(iu)}`);
           const th = $('#tr-tot-h', m), at = autoTot(c);
           th.className = 'recv-diff'; th.innerHTML = '';
           if (totTouched && at > 0 && Math.abs(at - c.tot) > 1e-8) th.innerHTML = `${t('tradeCalcV', { v: fc(at) })} <a href="#" id="tr-reset">${t('tradeUseCalc')}</a>`;
@@ -4003,7 +4014,8 @@
           if (inv && !invNew) {
             const h = baseHold(inv), cpu = sell ? sellCostPU(inv) : h.c;
             hb.style.display = '';
-            hb.innerHTML = `<span>${t('tradeHold')} <b class="num">${fq(h.q)}</b></span>` + (invBal ? '' : `<span>${t('tradeAvgCost')} <b class="num">${fi(cpu, { max: pxMax(cpu) })}</b></span><span>${t('colPrice')} <b class="num">${fi(+inv.price || 0, { max: pxMax(+inv.price) })}</b></span>`);
+            hb.innerHTML = c.vm ? `<span>${t('mktValue')} <b class="num">${fq(h.q)}</b></span><span>${t('totalCost')} <b class="num">${fi(h.q * (sell ? sellCostPU(inv) : h.c))}</b></span><span class="tr-hold-tip">${t('tradeValHint')}</span>`
+              : `<span>${t('tradeHold')} <b class="num">${fq(h.q)}</b></span>` + (invBal ? '' : `<span>${t('tradeAvgCost')} <b class="num">${fi(cpu, { max: pxMax(cpu) })}</b></span><span>${t('colPrice')} <b class="num">${fi(+inv.price || 0, { max: pxMax(+inv.price) })}</b></span>`);
           } else hb.style.display = 'none';
           const row = (l, v, cls) => `<div class="tr-r"><span>${l}</span><b class="num ${cls || ''}">${v}</b></div>`;
           const rows = [];
@@ -4020,12 +4032,12 @@
                 if (c.tot > 0) rows.push(row(t('realized'), `${fi(rl, { sign: true })} <small>(${pct(cb ? (rl / Math.abs(cb)) * 100 : 0)})</small>`, upDown(rl)));
               } else rows.push(row(t('realized'), t('tradeNoPnl')));
               rows.push(left < -1e-9 ? `<div class="tr-warn">${t('errTransferQty', { q: fq(h.q) })}</div>`
-                : row(t('tradeAfter'), left > 1e-9 ? (invBal ? t('tradeLeftBal', { q: fq(left) }) : t('tradeLeft', { q: fq(left) })) : t('tradeCleared')));
+                : row(t('tradeAfter'), left > 1e-9 ? (invBal ? t('tradeLeftBal', { q: fq(left) }) : c.vm ? t('tradeLeftVal', { v: fq(left), c: fi(left * sellCostPU(inv)) }) : t('tradeLeft', { q: fq(left) })) : t('tradeCleared')));
             } else {
               // 和实际记账顺序一致：先扣手续费（若从这项资产扣），再按买入摊薄平均成本
               const h = invNew ? { q: 0, c: 0 } : baseHold(inv), q0 = h.q - feeInv, nq = round8(q0 + c.qty);
               const nc = nq > 0 ? (q0 * h.c + c.totInv + c.feeInvV) / nq : 0;
-              if (c.tot > 0) rows.push(row(t('tradeAfter'), invBal ? `${t('tradeHold')} ${fq(nq)}` : `${fq(nq)} · ${t('tradeAvgCost')} ${fi(nc, { max: pxMax(nc) })}${h.q > 1e-9 ? ` <small class="dim">(${fi(h.c, { max: pxMax(h.c) })} →)</small>` : ''}`));
+              if (c.tot > 0) rows.push(row(t('tradeAfter'), invBal ? `${t('tradeHold')} ${fq(nq)}` : c.vm ? t('tradeAfterVal', { v: fq(nq), c: fi(q0 * h.c + c.totInv + c.feeInvV) }) : `${fq(nq)} · ${t('tradeAvgCost')} ${fi(nc, { max: pxMax(nc) })}${h.q > 1e-9 ? ` <small class="dim">(${fi(h.c, { max: pxMax(h.c) })} →)</small>` : ''}`));
             }
           }
           pv.innerHTML = rows.join(''); pv.style.display = rows.length ? '' : 'none';
@@ -4114,7 +4126,8 @@
         $('#tr-all', m).addEventListener('click', () => {
           const c = tradeCalc(); if (!c.inv) return;
           const feeInv = c.fa && c.fa.id === c.inv.id ? c.fee : 0;
-          setF('#tr-qty', Math.max(0, baseHold(c.inv).q - feeInv)); totTouched = false; tradeSync();
+          const n = Math.max(0, baseHold(c.inv).q - feeInv);
+          setF('#tr-qty', c.vm ? n * c.up : n); totTouched = false; tradeSync();
         });
         $('#tr-wrap', m).addEventListener('click', e => { if (e.target.id !== 'tr-reset') return; e.preventDefault(); totTouched = false; tradeSync(); });
         ['#tr-qty', '#tr-px', '#tr-fee', '#tr-tot'].forEach(id => $(id, m).addEventListener('keydown', e => { if (e.key === 'Enter') $('#tf-save', m).click(); }));
@@ -4131,8 +4144,10 @@
           if (!isNew && f.id === to.id) { toast(t('errTransferSame'), 'err'); return; }
           if (badDir(sell ? f : to, sell ? to : f)) { toast(t(sell ? 'errSellInv' : 'errBuyInv'), 'err'); return; }
           const bad = (id, k) => { toast(t(k), 'err'); $(id, m).focus(); };
-          const qty = trNum('#tr-qty'), px = trNum('#tr-px'), fee = trNum('#tr-fee'), tot = trNum('#tr-tot');
-          if (!(qty > 0)) return bad('#tr-qty', 'errTradeQty');
+          const vm = isValA(sell ? f : to), up = vm ? unitPOf(sell ? f : to) : 0, raw = trNum('#tr-qty');
+          if (vm && !(up > 0)) { toast(t('errNoMv', { n: (sell ? f : to).name }), 'err'); return; }
+          const qty = vm ? (raw > 0 ? raw / up : raw) : raw, px = vm ? up : trNum('#tr-px'), fee = trNum('#tr-fee'), tot = trNum('#tr-tot');
+          if (!(qty > 0)) return bad('#tr-qty', vm ? 'errAmount' : 'errTradeQty');
           if (!(px > 0)) return bad('#tr-px', 'errTradePx');
           if (isNaN(fee) || fee < 0) return bad('#tr-fee', 'errAmount');
           if (!(tot > 0)) return bad('#tr-tot', sell ? 'errRecv' : 'errAmount');
@@ -4155,7 +4170,10 @@
           if (ex) applyTx(ex, -1);
           const fu = qtyUnit(f), tu = qtyUnit(to), outQ = sell ? qty : tot, feeFromF = fa && fa.id === f.id ? fee : 0;
           const undo = () => { if (ex) applyTx(ex, 1); };
-          if (fu && outQ + feeFromF > (+f.qty || 0) + 1e-9) { const hq = trim8(+f.qty || 0); undo(); toast(t('errTransferQty', { q: `${hq} ${fu}` }), 'err'); return; }
+          if (fu && outQ + feeFromF > (+f.qty || 0) + 1e-9) {
+            const hq = vm && sell ? money((+f.qty || 0) * up, { ccy: aCcy(f), raw: true }) : `${trim8(+f.qty || 0)} ${fu}`;
+            undo(); toast(t(vm && sell ? 'errSellMv' : 'errTransferQty', { q: hq }), 'err'); return;
+          }
           if (fa && fa.id !== f.id && qtyUnit(fa) && fee > (+fa.qty || 0) + 1e-9) { const hq = trim8(+fa.qty || 0); undo(); toast(t('errFeeQty', { n: fa.name, q: `${hq} ${qtyUnit(fa)}` }), 'err'); return; }
           Object.keys(tx).forEach(k => { if (!['id', 'createdAt', 'log'].includes(k)) delete tx[k]; });
           Object.assign(tx, { date, type: 'transfer', cat: 'transfer', trade, amount: round8(outQ), ccy: aCcy(f), accountId: f.id, toId: to.id, toAmount: round8(sell ? tot : qty), toCcy: aCcy(to),
@@ -4165,6 +4183,7 @@
           if (tu) { tx.toUnit = tu; tx.inCost = round8(sell ? totV : totInv + feeInvV); }
           if (sell && !invBal) { tx.costBasis = round8(qty * costPU); tx.realized = round8(totInv - feeInvV - tx.costBasis); tx.realizedCcy = aCcy(f); }
           if (pre) tx.preTrade = pre;
+          if (vm) tx.tradeMv = round8(raw);
           if (isNew) {
             DB.assets.push(to);
             logOp('asset', to, 'create', ASSET_FIELDS.filter(k => !['locked'].includes(k) && to[k] !== '' && to[k] != null).map(k => [k, '', to[k]]), { tx: recTitle('tx', tx) });
@@ -4176,7 +4195,7 @@
           logBalChanges(bal0, tx, old ? 'edit' : 'create');
           commit(); closeModal(); renderAll();
           const iu = unitLbl(inv);
-          toast(`${t('trade_' + trade)} · ${inv.name} ${trim8(qty)}${iu ? ' ' + iu : ''} @ ${money(px, { ccy: pc, max: pxMax(px), raw: true })}${tx.realized != null ? ` · ${t('realized')} ${money(tx.realized, { ccy: tx.realizedCcy, sign: true })}` : ''}${isNew ? ' · ' + t('newAssetMade', { n: to.name }) : ''}${pre && !(old && old.trade) ? ' · ' + t('tradeUndoHint') : ''}`, 'ok');
+          toast(`${t('trade_' + trade)} · ${inv.name} ${vm ? money(raw, { ccy: aCcy(inv), raw: true }) : `${trim8(qty)}${iu ? ' ' + iu : ''} @ ${money(px, { ccy: pc, max: pxMax(px), raw: true })}`}${tx.realized != null ? ` · ${t('realized')} ${money(tx.realized, { ccy: tx.realizedCcy, sign: true })}` : ''}${isNew ? ' · ' + t('newAssetMade', { n: to.name }) : ''}${pre && !(old && old.trade) ? ' · ' + t('tradeUndoHint') : ''}`, 'ok');
           if (isNew && to.source === 'online') refreshOne(to);
         };
         $('#tf-amount', m).addEventListener('input', syncRow);
@@ -4292,7 +4311,7 @@
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           if (ex) applyTx(ex, -1);
-          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade'].forEach(k => delete tx[k]);
+          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade', 'tradeMv'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
           delete tx.appliedPx; delete tx.appliedCost;
           const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;
@@ -4365,6 +4384,9 @@
     const isStd = DISPLAY_CCYS.includes(aCcy(f));
     const num = v => (v === '' || v == null ? '' : esc(trim8(v)));
     const whs = whList().slice();
+    // 按市值（不填数量）：单价 / 成本输入框填的是「当前市值 / 总成本」，内部仍按「份数 × 每份价格」保存（卖出部分后份数会变小）
+    const valQ = ex && ex.noQty && !isBalance(ex) && +ex.qty > 0 ? +ex.qty : 1;
+    if (ex && ex.noQty && !isBalance(ex)) { f.price = round8(valQ * (+ex.price || 0)); f.cost = round8(valQ * (+ex.cost || 0)); }
     const body = `
       <div class="field"><label>${t('assetClass')} <span class="dim">· ${t('multiOk')}</span></label>
         <div class="cls-grid" id="af-cls">${clsKeys().map(c => `<button type="button" data-v="${c}" class="${f.cls.includes(c) ? 'on' : ''}" style="--tc:${clsColor(c)}"><i class="cdot"></i>${clsName(c)}<em>${f.cls[0] === c && f.cls.length > 1 ? t('primary') : ''}</em></button>`).join('')}</div>
@@ -4383,9 +4405,9 @@
         <div class="field"><label id="af-qty-l"></label><input class="input num" id="af-qty" inputmode="decimal" autocomplete="off" value="${f.noQty ? '' : num(f.qty)}" placeholder="0.00000000"></div>
         <div class="field" id="af-unit-wrap"><label>${t('unit')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input" id="af-unit" list="af-unit-list" maxlength="12" value="${esc(unitLabel(f.unit))}" placeholder="${t('unitPh')}" autocomplete="off">
           <datalist id="af-unit-list">${['oz', 'g', 'kg'].concat(t('unitPresets').split(',')).map(u => `<option value="${esc(u)}">`).join('')}</datalist></div>
-        <div class="field hide-bal" id="af-cost-wrap"><label>${t('avgCost')}</label><input class="input num" id="af-cost" inputmode="decimal" autocomplete="off" value="${num(f.cost)}" placeholder="0.00"></div>
+        <div class="field hide-bal" id="af-cost-wrap"><label id="af-cost-l">${t('avgCost')}</label><input class="input num" id="af-cost" inputmode="decimal" autocomplete="off" value="${num(f.cost)}" placeholder="0.00"></div>
       </div>
-      <div class="field hide-bal"><label>${t('curPrice')}</label><div class="input-group">
+      <div class="field hide-bal"><label id="af-price-l">${t('curPrice')}</label><div class="input-group">
         <input class="input num" id="af-price" inputmode="decimal" autocomplete="off" value="${num(f.price)}" placeholder="0.00">
         <button type="button" class="btn btn-soft" id="af-fetch">${ic('bolt')}${t('fetchOnline')}</button></div></div>
       <div class="fetch-msg" id="af-msg"></div>
@@ -4394,6 +4416,7 @@
         <button type="button" data-v="manual" class="${f.source !== 'online' ? 'on' : ''}">${t('srcManual')}</button></div></div>
       <div class="field" id="af-mode-wrap"><label>${t('fillMode')}</label><div class="seg seg-full" id="af-mode">
         <button type="button" data-v="bal">${t('fillBal')}</button>
+        <button type="button" data-v="val">${t('fillVal')}</button>
         <button type="button" data-v="qty">${t('fillQty')}</button></div><div class="hint" id="af-mode-hint"></div></div>
       <div class="field"><label>${t('noteOpt')}</label><input class="input" id="af-note" value="${esc(f.note || '')}" maxlength="80" placeholder="${t('notePh')}"></div>
       <div class="preview" id="af-preview"></div>`;
@@ -4403,7 +4426,9 @@
       footer: `${ex ? `<span class="foot-meta">${t('createdAt')} ${fullTime(ex.createdAt)}</span>` : ''}<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" id="af-save">${ic('check')}${t('save')}</button>`,
       onMount(m) {
         // balMode：手动维护的非现金资产可选“按余额填写”（新建默认按余额；已有资产保持原方式）
-        const st = { cls: f.cls.slice(), ccy: isStd ? aCcy(f) : 'OTHER', source: f.source || 'online', touched: !!ex, balMode: ex ? !!ex.balMode : true };
+        const st = { cls: f.cls.slice(), ccy: isStd ? aCcy(f) : 'OTHER', source: f.source || 'online', touched: !!ex, balMode: ex ? !!ex.balMode : true, valMode: !!(ex && ex.noQty), intQ: valQ };
+        /** 当前是否按市值填写：手动来源、非现金 / 负债、没选「按余额」 */
+        const isVal = a => st.valMode && !st.balMode && st.source === 'manual' && !hasBalTag(a);
         const readForm = () => {
           const ccy = st.ccy === 'OTHER' ? ($('#af-ccy-other', m).value.trim().toUpperCase() || 'USD') : st.ccy;
           return {
@@ -4427,9 +4452,14 @@
           $('#af-src-wrap', m).style.display = tagBal ? 'none' : '';
           const showMode = !tagBal && st.source === 'manual';
           $('#af-mode-wrap', m).style.display = showMode ? '' : 'none';
-          $$('#af-mode button', m).forEach(x => x.classList.toggle('on', x.dataset.v === (a.balMode ? 'bal' : 'qty')));
-          $('#af-mode-hint', m).textContent = a.balMode ? t('fillBalHint') : t('fillQtyHint');
-          const showUnit = !bal;   // 所有非现金类资产都可以填计量单位（选填）
+          const vm = !bal && isVal(a), md = a.balMode ? 'bal' : vm ? 'val' : 'qty';
+          $$('#af-mode button', m).forEach(x => x.classList.toggle('on', x.dataset.v === md));
+          $('#af-mode-hint', m).textContent = t(md === 'bal' ? 'fillBalHint' : md === 'val' ? 'fillValHint' : 'fillQtyHint');
+          $('#af-qty', m).closest('.field').style.display = vm ? 'none' : '';
+          $('#af-price-l', m).textContent = vm ? t('mktValue') : t('curPrice');
+          $('#af-cost-l', m).textContent = vm ? t('totalCost') : t('avgCost');
+          $('#af-fetch', m).style.display = vm ? 'none' : '';
+          const showUnit = !bal && !vm;   // 所有非现金类资产都可以填计量单位（选填）
           $('#af-unit-wrap', m).style.display = showUnit ? '' : 'none';
           $('#af-cost-wrap', m).style.gridColumn = showUnit ? '1 / -1' : '';
           $('#af-code-wrap', m).style.display = bal ? 'none' : '';
@@ -4445,7 +4475,7 @@
         };
         const preview = () => {
           const a = readForm(), ccy = a.ccy, bal = isBalance(a);
-          const q = isNaN(a.qty) ? 0 : a.qty, p = bal ? 1 : (isNaN(a.price) ? 0 : a.price), c = bal ? 1 : (isNaN(a.cost) ? 0 : a.cost);
+          const q = !bal && isVal(a) ? 1 : isNaN(a.qty) ? 0 : a.qty, p = bal ? 1 : (isNaN(a.price) ? 0 : a.price), c = bal ? 1 : (isNaN(a.cost) ? 0 : a.cost);
           const qq = a.cls.includes('liability') && q > 0 ? -q : q;
           const v = qq * p, cost = qq * c, pnl = v - cost, showD = ccy !== S().ccy;
           $('#af-preview', m).innerHTML = `<div><div class="l">${t('colValue')}</div><div class="v num ${v < 0 ? 'down' : ''}">${money(v, { ccy, max: 8, raw: true })}${showD ? `<small>≈ ${money(conv(v, ccy), { raw: true })}</small>` : ''}</div></div>
@@ -4485,11 +4515,24 @@
         // 切换填写方式时换算输入框：数量×单价 → 余额（市值），余额 → 1 份 × 单价
         $('#af-mode', m).addEventListener('click', e => {
           const b = e.target.closest('[data-v]'); if (!b) return;
-          const toBal = b.dataset.v === 'bal'; if (toBal === st.balMode) return;
-          const q = parseNum($('#af-qty', m).value), p = parseNum($('#af-price', m).value);
-          if (toBal) { const v = !isNaN(p) && p > 0 ? (isNaN(q) ? 1 : q) * p : q; $('#af-qty', m).value = isNaN(v) ? '' : trim8(round8(v)); }
-          else if (!isNaN(q)) { $('#af-price', m).value = trim8(q); $('#af-cost', m).value = $('#af-cost', m).value || trim8(q); $('#af-qty', m).value = ''; }
-          st.balMode = toBal; sync();
+          const to = b.dataset.v, from = st.balMode ? 'bal' : st.valMode ? 'val' : 'qty'; if (to === from) return;
+          const set = (id, n) => { $(id, m).value = isNaN(n) || n === '' ? '' : trim8(round8(n)); };
+          const q = parseNum($('#af-qty', m).value), p = parseNum($('#af-price', m).value), c = parseNum($('#af-cost', m).value);
+          // 先算出当前的市值 / 总成本，再换成目标方式的输入
+          const qq = from === 'val' ? 1 : isNaN(q) ? 1 : q;
+          const V = from === 'bal' ? q : (isNaN(p) ? NaN : qq * p), C = from === 'bal' ? NaN : (isNaN(c) ? NaN : qq * c);
+          if (to === 'bal') set('#af-qty', V);
+          else if (to === 'val') {
+            if (from === 'qty' && q > 0) st.intQ = q;       // 内部份数沿用原数量，市值 / 盈亏和历史记录都不变
+            if (from === 'bal') st.intQ = 1;
+            set('#af-price', V); if (from === 'bal') set('#af-cost', $('#af-cost', m).value ? parseNum($('#af-cost', m).value) : V); else set('#af-cost', C);
+            $('#af-qty', m).value = '';
+          } else {
+            const n = from === 'val' ? st.intQ || 1 : 1;
+            if (from === 'val') { set('#af-qty', n); set('#af-price', V / n); set('#af-cost', isNaN(C) ? NaN : C / n); }
+            else { $('#af-price', m).value = isNaN(V) ? '' : trim8(round8(V)); $('#af-cost', m).value = $('#af-cost', m).value || (isNaN(V) ? '' : trim8(round8(V))); $('#af-qty', m).value = ''; }
+          }
+          st.balMode = to === 'bal'; st.valMode = to === 'val'; sync();
         });
         ['#af-qty', '#af-cost', '#af-price', '#af-ccy-other'].forEach(s => $(s, m).addEventListener('input', preview));
         $('#af-code', m).addEventListener('input', sync);
@@ -4515,9 +4558,14 @@
           if (!a.name && !a.code) { toast(t('errNeedName'), 'err'); $('#af-name', m).focus(); return; }
           if (!a.name) a.name = a.code;
           // 数量选填：现金类不填 = 0；其他资产不填 = 按 1 份计（单价就是总市值），列表里数量显示 —
-          const qtyRaw = $('#af-qty', m).value.trim();
+          const qtyRaw = $('#af-qty', m).value.trim(), vm = !bal && isVal(a);
           a.noQty = false;
-          if (!qtyRaw) { if (bal) a.qty = 0; else { a.qty = 1; a.noQty = true; } }
+          if (vm) {
+            // 按市值：输入的是市值 / 总成本，按内部份数换算成每份价格 / 成本
+            const n = st.intQ > 0 ? st.intQ : 1;
+            if (isNaN(a.price) || a.price < 0) { toast(t('errAmount'), 'err'); $('#af-price', m).focus(); return; }
+            a.qty = n; a.noQty = true; a.price = round8(a.price / n); if (!isNaN(a.cost)) a.cost = round8(a.cost / n);
+          } else if (!qtyRaw) { if (bal) a.qty = 0; else { a.qty = 1; a.noQty = true; } }
           else if (isNaN(a.qty)) { toast(t('errQty'), 'err'); $('#af-qty', m).focus(); return; }
           if (!validCcy(a.ccy)) { toast(t('errRate', { c: a.ccy }), 'err'); return; }
           if (bal) {
@@ -4600,6 +4648,7 @@
     if (f === 'trade') return esc(t('trade_' + v));
     if (f === 'source') return esc(v === 'online' ? t('srcOnline') : t('srcManual'));
     if (f === 'balMode') return v ? t('fillBal') : t('fillQty');
+    if (f === 'noQty') return v ? t('fillVal') : t('fillQty');
     if (f === 'locked') return v ? t('lockYes') : t('lockNo');
     if (f === 'unit') return esc(t('unit_' + v));
     if (typeof v === 'number') return hidden() && ['qty', 'cost', 'price', 'amount', 'toAmount', 'fee', 'tradePx', 'tradeFee'].includes(f) ? MASK : fmtNum(v, 0, 8);
