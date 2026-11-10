@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -318,7 +318,7 @@
     try { mergeKeys(obj); mergeSrcs(obj); } catch (e) { /* Key / 来源合并失败不影响数据恢复 */ }   // 不论从哪个入口拉取（同步 / 从云端拉取），行情 API Key 都一起恢复
     const c = migrate(JSON.parse(JSON.stringify(obj)));
     DB.assets = c.assets; DB.txs = c.txs; DB.subs = c.subs || [];
-    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, assetCls: c.meta.assetCls || DB.meta.assetCls, whs: c.meta.whs || DB.meta.whs, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '' });
+    DB.meta = Object.assign({}, DB.meta, { name: c.meta.name, subtitle: c.meta.subtitle, icon: c.meta.icon, logo: c.meta.logo || '', subCats: c.meta.subCats || DB.meta.subCats, assetCls: c.meta.assetCls || DB.meta.assetCls, whs: c.meta.whs || DB.meta.whs, updatedAt: c.meta.updatedAt || 0, demo: c.meta.demo, since: c.meta.since || '', costExFee: c.meta.costExFee != null ? !!c.meta.costExFee : DB.meta.costExFee });
     // 每日快照：同一个 Gist 的两台设备互相合并；换了 Gist（另一个账本）就直接用云端的，不把旧账本的历史带进来
     const sameBook = S().snapsGist === S().gistId;
     if (sameBook) mergeSnaps(c.snaps); else DB.snaps = c.snaps || {};
@@ -2231,7 +2231,7 @@
     const lg = (x.log || []).slice().reverse().find(e => e.act === 'edit' && (e.diffs || []).some(d => d[0] === 'trade' && !d[1] && d[2]));
     if (!lg) return null;
     const o = JSON.parse(JSON.stringify(x));
-    ['log', 'preTrade', 'tradeMv', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
+    ['log', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
     lg.diffs.forEach(([k, a]) => { if (a === '' || a == null) delete o[k]; else o[k] = a; });
     const f = findAsset(o.accountId), to = findAsset(o.toId);
     if (!f || !to || o.type !== 'transfer') return null;
@@ -2269,7 +2269,8 @@
   /** 收益概览：未实现 + 已实现 + 分红利息（收入「投资收益」）= 总收益；按当前类别筛选 */
   function retSummary(cls) {
     let un = 0, n = 0, real = 0, div = 0, any = false;
-    DB.assets.forEach(a => { if (isBalance(a) || !inCls(a, cls)) return; un += aValD(a) - aCostD(a); n++; });
+    let pend = 0;
+    DB.assets.forEach(a => { if (isBalance(a) || !inCls(a, cls)) return; un += aValD(a) - aCostD(a); pend += conv(+a.feePool || 0, aCcy(a)); n++; });
     DB.txs.forEach(x => {
       const isR = x.trade === 'sell' && x.realized != null, isD = x.type === 'income' && x.cat === 'invest';
       if (!isR && !isD) return;
@@ -2278,13 +2279,13 @@
       if (isR) real += realD(x); else div += txD(x);
       any = true;
     });
-    return { un, real, div, total: un + real + div, show: (n > 0 || any) && !['cash', 'liability'].includes(cls) };
+    return { un, real, div, pend, total: un + real + div - pend, show: (n > 0 || any) && !['cash', 'liability'].includes(cls) };
   }
   function retStripHTML(cls) {
     const r = retSummary(cls);
     if (!r.show) return '';
     const cell = (l, v, c) => `<div class="${c || ''}"><span>${l}</span><b class="num ${upDown(v)}">${money(v, { sign: true })}</b></div>`;
-    return `<div class="ret-strip glass" title="${esc(t('retTip'))}">${cell(t('retUn'), r.un)}${cell(t('retReal'), r.real)}${cell(t('retDiv'), r.div)}${cell(t('retTotal'), r.total, 'tot')}</div>`;
+    return `<div class="ret-strip glass" title="${esc(t('retTip') + (r.pend > 0.005 ? '\n' + t('retPend', { v: money(r.pend) }) : ''))}">${cell(t('retUn'), r.un)}${cell(t('retReal'), r.real)}${cell(t('retDiv'), r.div)}${cell(t('retTotal'), r.total, 'tot')}</div>`;
   }
   function holdCols() {
     const H = UI.hold, D = S().ccy, RM = realMap(), hasReal = Object.keys(RM).length > 0;
@@ -2332,7 +2333,7 @@
               ${RM[a.id] ? `<div class="p num ${upDown(RM[a.id])}">${t('realized')} ${money(RM[a.id], { sign: true })}</div>` : ''}</div></div>
           <div class="hc-grid">
             <div><div class="l">${bal ? t('cashBalance') : t('colQty')}</div><div class="x num">${qtyStr(a)}${unitSuffix(a)}</div></div>
-            <div><div class="l">${isValA(a) ? t('totalCost') : t('colCost')}</div><div class="x num">${bal ? '—' : isValA(a) ? money(aCostD(a)) : money(conv(+a.cost || 0, aCcy(a)), { max: 8 })}</div></div>
+            <div><div class="l">${isValA(a) ? t('totalCost') : t('colCost')}</div><div class="x num">${bal ? '—' : isValA(a) ? money(aCostD(a)) : money(conv(+a.cost || 0, aCcy(a)), { max: pxMax(conv(+a.cost || 0, aCcy(a))) })}</div></div>
             <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : isValA(a) ? `<span class="dim">${t('byValue')}</span>` : money(conv(+a.price || 0, aCcy(a)), { max: pxMax(conv(+a.price || 0, aCcy(a))) }) + extTag(a) + srcTag(a)}</div></div>
           </div>
           ${a.warehouse ? `<div class="hc-wh">${ic('db')}${esc(a.warehouse)}</div>` : ''}
@@ -2356,7 +2357,8 @@
   const canQuickUpdate = a => isBalance(a) || !(a.source === 'online' && Api.canQuote(a));
   /** 盘前 / 盘后参考价（美股常规时段以外才显示；12 小时内取到的） */
   /** 单价 / 均价显示几位小数：≥ 1 时 2 位，越小越多（最多 8 位，低价币也看得清） */
-  const pxMax = v => { const a = Math.abs(+v || 0); return a >= 1 || !a ? 2 : a >= 0.01 ? 4 : a >= 0.0001 ? 6 : 8; };
+  // 单价 / 均价最多显示的小数位：≥1 显示到 3 位（和券商一样，如 15.147；末尾的 0 自动去掉，至少 2 位）
+  const pxMax = v => { const a = Math.abs(+v || 0); return !a ? 2 : a >= 1 ? 3 : a >= 0.01 ? 4 : a >= 0.0001 ? 6 : 8; };
   const extTag = a => {
     const e = a.ext;
     if (!e || !(e.p > 0) || !(+a.price > 0) || Date.now() - (e.at || 0) > 12 * 3600e3 || Api.usRegularOpen()) return '';
@@ -2375,6 +2377,8 @@
   /** 今日盈亏单元格：没有变化显示 — */
   const dayCell = (ch, p, inline) => (Math.abs(ch) < 0.005 ? '<span class="dim">—</span>'
     : inline ? `${money(ch, { sign: true })} (${pct(p)})` : `${money(ch, { sign: true })}<small class="${upDown(ch)}">${pct(p)}</small>`);
+  /** 设置：持仓均价不含买入手续费（和券商「平均价」一致）。存在账本里，随云同步 */
+  const costExFee = () => !!DB.meta.costExFee;
   /** 按市值记的资产（不填数量）：成本列显示总成本，单价列显示「按市值」 */
   const isValA = a => !!(a && a.noQty && !isBalance(a));
   const valCostCell = (a, x) => `${money(aCostD(a))}<small>${t('totalCost')}</small>`;
@@ -3472,6 +3476,11 @@
           ${dfixNoteHTML()}
         </div>
         <div class="card glass">
+          <div class="card-head"><div class="card-title"><span class="ico">${ic('linechart')}</span>${t('setInvT')}</div></div>
+          <label class="switch-row"><span>${t('costExFee')}<small>${t('costExFeeSub')}</small></span>
+            <span class="switch"><input type="checkbox" data-change="costExFee" ${costExFee() ? 'checked' : ''}><i></i></span></label>
+        </div>
+        <div class="card glass">
           <div class="card-head"><div class="card-title"><span class="ico">${ic('shield')}</span>${t('setSecT')}</div>
             <span class="src ${s.passHash ? 'online' : ''}"><i></i>${s.passHash ? t('passSet') : t('passNotSet')}</span></div>
           <p class="set-desc">${t('setSecSub')}</p>
@@ -3916,13 +3925,13 @@
         /** 某资产的持仓（编辑时先扣掉这笔记录本身带来的变化） */
         const baseHold = a => {
           if (!a) return { q: 0, c: 0 };
-          let q = +a.qty || 0, c = +a.cost || 0;
+          let q = +a.qty || 0, c = +a.cost || 0, pl = +a.feePool || 0;
           if (ex && ex.type === 'transfer' && ex.applied && a.id) {
-            if (ex.toId === a.id) { const q0 = q - (+ex.toAmount || 0); if (ex.inCost != null && !isBalance(a) && q0 > 1e-12) c = (q * c - (+ex.inCost || 0)) / q0; q = q0; }
-            if (ex.accountId === a.id) q += (+ex.amount || 0) + (ex.feeId ? 0 : +ex.fee || 0);
+            if (ex.toId === a.id) { const q0 = q - (+ex.toAmount || 0); if (ex.inCost != null && !isBalance(a) && q0 > 1e-12) c = (q * c - (+ex.inCost || 0)) / q0; q = q0; pl -= +ex.feePool || 0; }
+            if (ex.accountId === a.id) { q += (+ex.amount || 0) + (ex.feeId ? 0 : +ex.fee || 0); pl += +ex.feeRel || 0; }
             if (ex.feeId === a.id) q += +ex.fee || 0;
           }
-          return { q: round8(q), c };
+          return { q: round8(q), c, pl: Math.max(0, pl) };
         };
         /** 卖出部分的单位成本：编辑已有卖出时沿用当时的成本，避免之后的买入改变这笔的已实现盈亏 */
         const sellCostPU = f => (ex && ex.trade === 'sell' && ex.accountId === f.id && +ex.amount > 0 && ex.costBasis != null ? +ex.costBasis / +ex.amount : baseHold(f).c);
@@ -4041,8 +4050,10 @@
             if (sell) {
               const h = baseHold(inv), left = round8(h.q - c.qty - feeInv);
               if (!invBal) {
-                const cb = c.qty * sellCostPU(inv), rl = c.totInv - c.feeInvV - cb;
+                const rel = h.pl > 1e-12 && h.q > 1e-12 ? Math.min(h.pl, h.pl * (c.qty + feeInv) / h.q) : 0;   // 按比例释放的待摊买入手续费
+                const cb = c.qty * sellCostPU(inv), rl = c.totInv - c.feeInvV - cb - rel;
                 rows.push(row(t('tradeCostPart'), fi(cb)));
+                if (rel > 1e-9) rows.push(row(t('tradeFeeRel'), fi(-rel, { sign: true })));
                 if (c.tot > 0) rows.push(row(t('realized'), `${fi(rl, { sign: true })} <small>(${pct(cb ? (rl / Math.abs(cb)) * 100 : 0)})</small>`, upDown(rl)));
               } else rows.push(row(t('realized'), t('tradeNoPnl')));
               rows.push(left < -1e-9 ? `<div class="tr-warn">${t('errTransferQty', { q: fq(h.q) })}</div>`
@@ -4050,8 +4061,10 @@
             } else {
               // 和实际记账顺序一致：先扣手续费（若从这项资产扣），再按买入摊薄平均成本
               const h = invNew ? { q: 0, c: 0 } : baseHold(inv), q0 = h.q - feeInv, nq = round8(q0 + c.qty);
-              const nc = nq > 0 ? (q0 * h.c + c.totInv + c.feeInvV) / nq : 0;
-              if (c.tot > 0) rows.push(row(t('tradeAfter'), invBal ? `${t('tradeHold')} ${fq(nq)}` : c.vm ? t('tradeAfterVal', { v: fq(nq), c: fi(q0 * h.c + c.totInv + c.feeInvV) }) : `${fq(nq)} · ${t('tradeAvgCost')} ${fi(nc, { max: pxMax(nc) })}${h.q > 1e-9 ? ` <small class="dim">(${fi(h.c, { max: pxMax(h.c) })} →)</small>` : ''}`));
+              const bf = !invBal && costExFee() ? c.totInv - conv(c.tot * c.cpx, aCcy(cash), aCcy(inv)) + c.feeInvV : 0;   // 不进均价的买入手续费
+              const nc = nq > 0 ? (q0 * h.c + c.totInv + c.feeInvV - bf) / nq : 0;
+              if (bf > 1e-9) rows.push(row(t('tradeFeePend'), fi(bf)));
+              if (c.tot > 0) rows.push(row(t('tradeAfter'), invBal ? `${t('tradeHold')} ${fq(nq)}` : c.vm ? t('tradeAfterVal', { v: fq(nq), c: fi(q0 * h.c + c.totInv + c.feeInvV - bf) }) : `${fq(nq)} · ${t('tradeAvgCost')} ${fi(nc, { max: pxMax(nc) })}${h.q > 1e-9 ? ` <small class="dim">(${fi(h.c, { max: pxMax(h.c) })} →)</small>` : ''}`));
             }
           }
           pv.innerHTML = rows.join(''); pv.style.display = rows.length ? '' : 'none';
@@ -4195,8 +4208,15 @@
             fee: fa ? fee : 0, value: sell ? round8(invBal ? qty : qty * px) : totV, feeValue: fa ? round8(fee * unitPx(fa)) : 0, tradePx: px, tradePxCcy: pc, tradeFee: fee, tradeCls: primary(inv), note: $('#tf-note', m).value.trim(), applied: true });
           if (fa) { tx.feeId = fa.id; tx.feeCcy = aCcy(fa); if (qtyUnit(fa)) tx.feeUnit = qtyUnit(fa); }
           if (fu) tx.fromUnit = fu;
-          if (tu) { tx.toUnit = tu; tx.inCost = round8(sell ? totV : totInv + feeInvV); }
-          if (sell && !invBal) { tx.costBasis = round8(qty * costPU); tx.realized = round8(totInv - feeInvV - tx.costBasis); tx.realizedCcy = aCcy(f); }
+          // 持仓均价不含手续费（设置）：买入手续费不进成本，记进这项资产的「待摊手续费」，卖出时按比例计入已实现盈亏
+          const exFee = costExFee() && !invBal, buyFeeV = !sell ? totInv - conv(round8(tot * cpx), aCcy(cash), aCcy(inv)) + feeInvV : 0;
+          if (tu) { tx.toUnit = tu; tx.inCost = round8(sell ? totV : totInv + feeInvV - (exFee ? buyFeeV : 0)); }
+          if (!sell && exFee && buyFeeV > 1e-9) tx.feePool = round8(buyFeeV);
+          if (sell && !invBal) {
+            const pool = +f.feePool || 0, hq = +f.qty || 0;
+            if (pool > 1e-12 && hq > 1e-12) tx.feeRel = round8(Math.min(pool, pool * (qty + feeFromF) / hq));
+            tx.costBasis = round8(qty * costPU); tx.realized = round8(totInv - feeInvV - tx.costBasis - (+tx.feeRel || 0)); tx.realizedCcy = aCcy(f);
+          }
           if (pre) tx.preTrade = pre;
           if (vm) tx.tradeMv = round8(raw);
           if (isNew) {
@@ -4326,7 +4346,7 @@
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           if (ex) applyTx(ex, -1);
-          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade', 'tradeMv'].forEach(k => delete tx[k]);
+          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade', 'tradeMv', 'feePool', 'feeRel'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
           delete tx.appliedPx; delete tx.appliedCost;
           const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;
@@ -4364,7 +4384,11 @@
       const f = findAsset(tx.accountId), to = findAsset(tx.toId);
       const fa = tx.feeId ? findAsset(tx.feeId) : null;
       const steps = [
-        () => { if (f) f.qty = round8((+f.qty || 0) - ((+tx.amount || 0) + (tx.feeId ? 0 : +tx.fee || 0)) * sign); },   // 手续费默认从转出账户扣
+        () => {
+          if (!f) return;
+          f.qty = round8((+f.qty || 0) - ((+tx.amount || 0) + (tx.feeId ? 0 : +tx.fee || 0)) * sign);   // 手续费默认从转出账户扣
+          if (tx.feeRel) f.feePool = round8(Math.max(0, (+f.feePool || 0) - (+tx.feeRel || 0) * sign));   // 卖出：按比例释放待摊的买入手续费
+        },
         () => { if (fa) fa.qty = round8((+fa.qty || 0) - (+tx.fee || 0) * sign); },                                         // 指定了手续费账户（如 BNB）就从那里扣
         () => {
           if (!to) return;
@@ -4372,6 +4396,7 @@
           // 转入非现金资产时同步摊薄 / 还原平均成本：新成本 = (原数量×原成本 + 转入成本) / 新数量
           if (tx.inCost != null && !isBalance(to) && nq > 1e-12) to.cost = round8((q * (+to.cost || 0) + (+tx.inCost || 0) * sign) / nq);
           to.qty = round8(nq);
+          if (tx.feePool) to.feePool = round8(Math.max(0, (+to.feePool || 0) + (+tx.feePool || 0) * sign));   // 买入：手续费不进均价时记为待摊
         }
       ];
       // 回滚时倒序执行，手续费账户就是转入资产（如买 BTC 手续费扣 BTC）时平均成本也能完全还原
@@ -5411,6 +5436,7 @@
       if (c === 'rankCls') { S().rankCls = el.value; save(); renderRank(); return; }
       if (c === 'holdSort') { UI.hold.sort = el.value; renderHoldBody(); return; }
       if (c === 'pnlUp' || c === 'pnlDown') { S()[c] = el.value; S().pnlStyle = 'custom'; save(); applyTheme(); renderAll(); return; }
+      if (c === 'costExFee') { DB.meta.costExFee = el.checked; commit(); toast(t(el.checked ? 'costExFeeOn' : 'costExFeeOff'), 'ok'); return; }
       if (c === 'holdWh') { UI.hold.wh = el.value; renderHoldBody(); $$('[data-change="holdWh"]').forEach(x => { x.value = el.value; }); return; }
       if (c === 'holdSrc') { UI.hold.src = el.value; renderHoldBody(); $$('[data-change="holdSrc"]').forEach(x => { x.value = el.value; }); return; }
       if (c === 'ledCat') { UI.led.cat = el.value; renderLedBody(); return; }
