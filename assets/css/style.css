@@ -1291,3 +1291,4 @@ body.mobile .bl-ed .price-row [data-k="n"]{flex:1 1 100%}
 .ret-strip .tot{border-left:1px solid var(--stroke-2);padding-left:12px}
 @media (max-width:640px){.ret-strip{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px}.ret-strip .tot{border-left:0;padding-left:0}.ret-strip b{font-size:15px}}
 .tr-hold-tip{flex-basis:100%;font-size:11.5px;opacity:.8}
+.cal-mode{display:flex;width:max-content;margin:-2px 0 10px auto}.cal-mode button{padding:4px 12px;font-size:12px}

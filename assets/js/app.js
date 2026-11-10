@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '8.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1648,6 +1648,12 @@
     if (a >= 1e3) return sg + +(a / 1e3).toFixed(a >= 1e5 ? 0 : 1) + 'K';
     return sg + fmtNum(a, 0, a >= 100 ? 0 : 2);
   };
+  /** 日历格子里的数字：默认显示盈亏金额（1 万以内显示完整金额），可切换成百分比 */
+  const calAmt = v => { const a = Math.abs(v); return a < 1e4 ? (v > 0 ? '+' : v < 0 ? '-' : '') + fmtNum(a, 0, a >= 100 ? 0 : 2) : calNum(v); };
+  const calPctTxt = p => { const a = Math.abs(p); return (p > 0 ? '+' : p < 0 ? '-' : '') + a.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0) + '%'; };
+  const calVal = r => (hidden() ? '•••' : S().calPct && r.pct != null ? calPctTxt(r.pct) : calAmt(r.pnl));
+  const calNorm = v => (v == null ? null : typeof v === 'object' ? v : { pnl: +v, pct: null });
+  const calModeHTML = () => `<div class="cal-mode seg seg-sm"><button type="button" data-cal-mode="amt" class="${S().calPct ? '' : 'on'}">${t('calAmt')}</button><button type="button" data-cal-mode="pct" class="${S().calPct ? 'on' : ''}">%</button></div>`;
   const daySum = k => { const h = histDay(k); return h ? h.rows.reduce((s2, x) => s2 + x.ch, 0) : null; };
 
   /* ---- 指标卡按日期查看 ----
@@ -1707,14 +1713,14 @@
     const canPrev = shift(-1) >= first.slice(0, 7), canNext = shift(1) <= tk.slice(0, 7);
     const cells = [];
     for (let i = 0; i < startDow; i++) cells.push('<div class="cal-cell empty"></div>');
-    let mSum = 0, mDays = 0;
+    let mSum = 0, mDays = 0, anyPct = false;
     for (let d = 1; d <= days; d++) {
       const k = `${cur}-${String(d).padStart(2, '0')}`;
-      const v = k > tk ? null : o.val(k);
-      const has = v != null, sel = (o.sel || tk) === k;
-      if (has) { mSum += v; mDays++; }
-      cells.push(`<button type="button" class="cal-cell ${has ? upDown(v) || 'flat' : 'none'} ${sel ? 'sel' : ''} ${k === tk ? 'today' : ''}" ${has ? `data-day="${k}"` : 'disabled'}>
-        <b>${d}</b><small class="num">${has ? (hidden() ? '•••' : calNum(v)) : ''}</small></button>`);
+      const r = k > tk ? null : calNorm(o.val(k));
+      const has = r != null, sel = (o.sel || tk) === k;
+      if (has) { mSum += r.pnl; mDays++; if (r.pct != null) anyPct = true; }
+      cells.push(`<button type="button" class="cal-cell ${has ? upDown(r.pnl) || 'flat' : 'none'} ${sel ? 'sel' : ''} ${k === tk ? 'today' : ''}" ${has ? `data-day="${k}"` : 'disabled'}>
+        <b>${d}</b><small class="num">${has ? calVal(r) : ''}</small></button>`);
     }
     const dows = (S().lang === 'en' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['一', '二', '三', '四', '五', '六', '日']).map(x => `<div class="cal-dow">${x}</div>`).join('');
     const title = S().lang === 'en' ? new Date(y, mo - 1, 1).toLocaleDateString('en-US', { year: 'numeric', month: 'long' }) : `${y} 年 ${mo} 月`;
@@ -1724,11 +1730,12 @@
       body: `<div class="cal-nav"><button class="icon-btn sm" data-cal-m="${shift(-1)}" ${canPrev ? '' : 'disabled'}>${ic('chev-l')}</button>
           <div class="cal-title"><b>${title}</b>${subTxt ? `<small class="num ${o.monthSum === false ? '' : upDown(mDays ? mSum : 0)}">${subTxt}</small>` : ''}</div>
           <button class="icon-btn sm" data-cal-m="${shift(1)}" ${canNext ? '' : 'disabled'}>${ic('chev-r')}</button></div>
-        <div class="cal-grid">${dows}${cells.join('')}</div>
+        ${anyPct || o.pct ? calModeHTML() : ''}<div class="cal-grid">${dows}${cells.join('')}</div>
         <p class="hint" style="margin-top:12px">${o.hint || ''}</p>`,
       footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" data-cal-today>${ic('clock')}${t('rankCalToday')}</button>`,
       onMount(m) {
         m.addEventListener('click', e => {
+          const cm = e.target.closest('[data-cal-mode]'); if (cm) { S().calPct = cm.dataset.calMode === 'pct'; save(); openDayCal(Object.assign({}, o, { pct: true }), cur); return; }
           const nb = e.target.closest('[data-cal-m]'); if (nb && !nb.disabled) { openDayCal(o, nb.dataset.calM); return; }
           const db = e.target.closest('[data-day]');
           if (db || e.target.closest('[data-cal-today]')) { closeModal(); o.onPick(db ? db.dataset.day : tk); }
@@ -1748,18 +1755,19 @@
       const has = v != null;
       if (has) { ySum += v.pnl; yN++; }
       cells.push(`<button type="button" class="cal-cell mcell ${has ? upDown(v.pnl) || 'flat' : 'none'} ${(o.sel || tk.slice(0, 7)) === m ? 'sel' : ''} ${m === tk.slice(0, 7) ? 'today' : ''}" ${has ? `data-m="${m}"` : 'disabled'}>
-        <b>${S().lang === 'en' ? t('mon' + (i - 1)) : i + '月'}</b><small class="num">${has ? (hidden() ? '•••' : calNum(v.pnl)) : ''}</small>${has && v.est ? '<em>≈</em>' : ''}</button>`);
+        <b>${S().lang === 'en' ? t('mon' + (i - 1)) : i + '月'}</b><small class="num">${has ? calVal(v) : ''}</small>${has && v.est ? '<em>≈</em>' : ''}</button>`);
     }
     openModal({
       title: o.title,
       body: `<div class="cal-nav"><button class="icon-btn sm" data-cal-y="${yr - 1}" ${yr - 1 >= +first ? '' : 'disabled'}>${ic('chev-l')}</button>
           <div class="cal-title"><b>${yr}${S().lang === 'en' ? '' : ' 年'}</b><small class="num ${upDown(yN ? ySum : 0)}">${yN ? t('calYearSum', { v: money(ySum, { sign: true }) }) : t('rankCalNone')}</small></div>
           <button class="icon-btn sm" data-cal-y="${yr + 1}" ${yr + 1 <= cy ? '' : 'disabled'}>${ic('chev-r')}</button></div>
-        <div class="cal-grid m4">${cells.join('')}</div>
+        ${calModeHTML()}<div class="cal-grid m4">${cells.join('')}</div>
         <p class="hint" style="margin-top:12px">${o.hint || ''}</p>`,
       footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" data-cal-today>${ic('clock')}${t('calThisMonth')}</button>`,
       onMount(m) {
         m.addEventListener('click', e => {
+          const cm = e.target.closest('[data-cal-mode]'); if (cm) { S().calPct = cm.dataset.calMode === 'pct'; save(); openMonthCal(o, yr); return; }
           const nb = e.target.closest('[data-cal-y]'); if (nb && !nb.disabled) { openMonthCal(o, +nb.dataset.calY); return; }
           const db = e.target.closest('[data-m]');
           if (db || e.target.closest('[data-cal-today]')) { closeModal(); o.onPick(db ? db.dataset.m : tk.slice(0, 7)); }
@@ -1773,14 +1781,15 @@
     for (let yr = cy; yr >= first; yr--) {
       const v = o.val(String(yr)), has = v != null;
       cells.push(`<button type="button" class="cal-cell ycell ${has ? upDown(v.pnl) || 'flat' : 'none'} ${(o.sel || String(cy)) === String(yr) ? 'sel' : ''} ${yr === cy ? 'today' : ''}" ${has ? `data-y="${yr}"` : 'disabled'}>
-        <b>${yr}</b><small class="num">${has ? (hidden() ? MASK : money(v.pnl, { sign: true })) + ` · ${pct(v.pct)}` : ''}</small>${has && v.est ? '<em>≈</em>' : ''}</button>`);
+        <b>${yr}</b><small class="num">${has ? (S().calPct ? `${pct(v.pct)} · ${hidden() ? MASK : money(v.pnl, { sign: true })}` : `${hidden() ? MASK : money(v.pnl, { sign: true })} · ${pct(v.pct)}`) : ''}</small>${has && v.est ? '<em>≈</em>' : ''}</button>`);
     }
     openModal({
       title: o.title,
-      body: `<div class="cal-grid y1">${cells.join('')}</div><p class="hint" style="margin-top:12px">${o.hint || ''}</p>`,
+      body: `${calModeHTML()}<div class="cal-grid y1">${cells.join('')}</div><p class="hint" style="margin-top:12px">${o.hint || ''}</p>`,
       footer: `<button class="btn btn-glass" data-modal-close>${t('cancel')}</button><button class="btn btn-accent" data-cal-today>${ic('clock')}${t('calThisYear')}</button>`,
       onMount(m) {
         m.addEventListener('click', e => {
+          const cm = e.target.closest('[data-cal-mode]'); if (cm) { S().calPct = cm.dataset.calMode === 'pct'; save(); openYearCal(o); return; }
           const db = e.target.closest('[data-y]');
           if (db || e.target.closest('[data-cal-today]')) { closeModal(); o.onPick(db ? db.dataset.y : String(cy)); }
         });
@@ -1802,10 +1811,10 @@
     const pick = v => { UI.kd = UI.kd || {}; UI.kd[k] = v; refreshKpis(); };
     if (k === 'month') return openMonthCal({ title: t('kpiCalT_month'), sel, hint: t('kpiCalHint_period'), val: invMonth, onPick: m => pick(m === tk.slice(0, 7) ? '' : m) });
     if (k === 'year') return openYearCal({ title: t('kpiCalT_year'), sel, hint: t('kpiCalHint_period'), val: invYear, onPick: y => pick(y === tk.slice(0, 4) ? '' : y) });
-    if (k === 'total') return openDayCal({ title: t('kpiCalT_total'), sel, monthSum: false, hint: t('kpiCalHint_total'), val: d => { const r = invTotalAt(d); return r ? r.pnl : null; }, onPick: d => pick(d === tk ? '' : d) });
+    if (k === 'total') return openDayCal({ title: t('kpiCalT_total'), sel, monthSum: false, hint: t('kpiCalHint_total'), val: d => invTotalAt(d), onPick: d => pick(d === tk ? '' : d) });
     const c = k.startsWith('cls_') ? k.slice(4) : '';
     openDayCal({ title: c ? t('kpiCalT_cls', { c: clsName(c) }) : t('kpiCalT_day'), sel, hint: t('kpiCalHint_day'),
-      val: d => { const r = invDay(d, c); return r ? r.pnl : null; }, onPick: d => pick(d === tk ? '' : d) });
+      val: d => invDay(d, c), onPick: d => pick(d === tk ? '' : d) });
   }
   function renderMoves() {
     if (!$('#rank')) return;
@@ -3934,9 +3943,11 @@
           // 手续费账户：默认从付款 / 到账账户扣（并进到账 / 付款金额）；选了别的资产（如 BNB、股票本身）就单独从那里扣
           const fid = $('#tr-fee-acct', m).value, fa0 = fid ? findAsset(fid) : null, feeSep = !!(fa0 && A.cash && fa0.id !== A.cash.id);
           const fa = feeSep ? fa0 : null, feeInvV = fa && A.inv ? conv(fee * unitPx(fa), aCcy(fa), aCcy(A.inv)) : 0;
-          return Object.assign(A, { qty, px, fee, tot, cpx, pc, gross, fa, feeSep, feeInvV, vm, up, mv: vm ? raw : null, totInv: A.inv && A.cash ? conv(tot * cpx, aCcy(A.cash), aCcy(A.inv)) : 0 });
+          return Object.assign(A, { qty, px, fee, tot, cpx, pc, gross, fa, feeSep, feeInvV, vm, up, mv: vm ? raw : null, pay: trade === 'buy' ? round8(tot + (feeSep ? 0 : fee)) : tot,
+            // 买入：成交金额不含手续费，手续费从付款账户另扣；卖出：实际到账是扣完手续费的净额
+            totInv: A.inv && A.cash ? conv((trade === 'buy' ? tot + (feeSep ? 0 : fee) : tot) * cpx, aCcy(A.cash), aCcy(A.inv)) : 0 });
         };
-        const autoTot = c => { const mf = c.feeSep ? 0 : c.fee; return c.gross > 0 ? round8(Math.max(0, trade === 'sell' ? c.gross - mf : c.gross + mf)) : 0; };
+        const autoTot = c => { const mf = c.feeSep ? 0 : c.fee; return c.gross > 0 ? round8(Math.max(0, trade === 'sell' ? c.gross - mf : c.gross)) : 0; };
         const setF = (id, n) => { $(id, m).value = n > 0 ? trim8(round8(n)) : ''; };
         /** 切换模式：普通 ⇄ 买卖时把已填的数量 / 金额 / 手续费带过去；编辑旧转账改成买卖时按原记录推算成交价 */
         const setTrade = v => {
@@ -3945,7 +3956,7 @@
           if (prev && !v) {
             const c = tradeCalc(), sell = prev === 'sell';
             setF('#tf-amount', sell ? c.qty : c.tot); setF('#tf-recv', sell ? c.tot : c.qty);
-            if (c.feeSep && c.fee > 0) { $('#tf-fee-acct', m).value = c.fa.id === $('#tf-acct', m).value ? '' : c.fa.id; setF('#tf-fee', c.fee); }
+            if (c.fee > 0 && (c.feeSep || !sell)) { $('#tf-fee-acct', m).value = c.feeSep && c.fa.id !== $('#tf-acct', m).value ? c.fa.id : ''; setF('#tf-fee', c.fee); }
             else { $('#tf-fee-acct', m).value = ''; $('#tf-fee', m).value = ''; }
             recvTouched = !!recvEl.value; trade = v; return;
           }
@@ -3961,7 +3972,7 @@
           const A = trAssets(), sep = fee0 > 0 && !!fsel && (!A.cash || fsel !== A.cash.id), mf = sep ? 0 : fee0;   // 原手续费不是从付款 / 到账账户扣的 → 保留成单独的手续费账户
           if (sep) $('#tr-fee-acct', m).value = fsel;
           if (fee0 > 0) setF('#tr-fee', fee0);
-          const sell = v === 'sell', q = sell ? amt : rv, tot = sell ? (rv > 0 ? rv - mf : 0) : (amt > 0 ? amt + mf : 0), grossC = sell ? rv : amt;
+          const sell = v === 'sell', q = sell ? amt : rv, tot = sell ? (rv > 0 ? rv - mf : 0) : amt, grossC = sell ? rv : amt;
           setF('#tr-qty', q); setF('#tr-tot', tot);
           const c = tradeCalc();
           if (c.vm) { setF('#tr-qty', q * c.up); totTouched = tot > 0; }   // 按市值：数量（份）换成金额
@@ -3969,7 +3980,7 @@
         };
         if (trade && ex) {
           const sell = trade === 'sell';
-          setF('#tr-qty', ex.tradeMv != null ? ex.tradeMv : sell ? ex.amount : ex.toAmount); setF('#tr-px', ex.tradePx); setF('#tr-fee', ex.tradeFee); setF('#tr-tot', sell ? ex.toAmount : ex.amount);
+          setF('#tr-qty', ex.tradeMv != null ? ex.tradeMv : sell ? ex.amount : ex.toAmount); setF('#tr-px', ex.tradePx); setF('#tr-fee', ex.tradeFee); setF('#tr-tot', sell ? ex.toAmount : (+ex.amount || 0) - (ex.feeId ? 0 : +ex.tradeFee || 0));   // 买入记录里存的是共扣款，输入框显示成交金额
           $('#tr-fee-acct', m).value = ex.feeId || '';
         }
         /** 新记录：从投资资产转到现金类 → 卖出；从现金类转到投资资产 → 买入（手动点过就不再自动切换） */
@@ -3998,7 +4009,7 @@
           $('#tr-qty', m).placeholder = c.vm ? '0.00' : '0';
           $('#tr-px-l', m).innerHTML = `${t(sell ? 'tradeSellPx' : 'tradeBuyPx')}${inv && c.pc ? ` (${esc(c.pc)}${iu ? '/' + esc(iu) : ''})` : ''} <span class="dim">· ${t('tradeAvgPx')}</span>`;
           $('#tr-fee-l', m).innerHTML = `${t('fee')}${c.fa ? ` (${esc(fu || aCcy(c.fa))})` : cash ? ` (${esc(cu || aCcy(cash))})` : ''} <span class="dim">· ${t('codeOpt')}</span>`;
-          $('#tr-tot-l', m).innerHTML = `${t(sell ? 'tradeRecv' : 'tradePay')}${cash ? ` (${esc(cu || aCcy(cash))})` : ''}`;
+          $('#tr-tot-l', m).innerHTML = `${t(sell ? 'tradeRecv' : 'tradeBuyAmt')}${cash ? ` (${esc(cu || aCcy(cash))})` : ''}`;
           const pxRef = inv && !invNew ? (invBal ? (cash ? conv(1, aCcy(inv), aCcy(cash)) : 0) : +inv.price || 0) : 0;
           $('#tr-px', m).placeholder = pxRef > 0 ? trim8(round8(pxRef)) : '0.00';
           $('#tr-all', m).style.display = sell && inv ? '' : 'none';
@@ -4022,7 +4033,8 @@
           if (!inv || !cash) { pv.innerHTML = ''; pv.style.display = 'none'; return; }
           if (badDir(inv, cash)) rows.push(`<div class="tr-warn">${t(sell ? 'errSellInv' : 'errBuyInv')}</div>`);
           else if (c.qty > 0 && (c.px > 0 || c.tot > 0)) {
-            if (c.gross > 0) rows.push(row(t('tradeGross'), fc(c.gross)));
+            if (c.gross > 0 && (sell || Math.abs(c.gross - c.tot) > 1e-8)) rows.push(row(t('tradeGross'), fc(c.gross)));
+            if (!sell && c.tot > 0) rows.push(row(t('tradePayAll', { n: esc(cash.name) }), `${fc(c.pay)}${!c.feeSep && c.fee > 0 ? ` <small class="dim">(${t('tradePayParts', { a: fc(c.tot), f: fc(c.fee) })})</small>` : ''}`));
             const feeInv = c.fa && c.fa.id === inv.id ? c.fee : 0;   // 手续费直接从这项资产里扣（如用股票 / 币本身付手续费）
             if (sell) {
               const h = baseHold(inv), left = round8(h.q - c.qty - feeInv);
@@ -4161,14 +4173,15 @@
           }
           const inv = sell ? f : to, cash = sell ? to : f, cpx = unitPx(cash), pc = pxCcyOf(inv, cash), invBal = isBalance(inv);
           if (!(cpx > 0)) { toast(t('errTradeNoPx', { n: cash.name || cash.code }), 'err'); return; }
-          const totV = round8(tot * cpx), totInv = conv(totV, aCcy(cash), aCcy(inv)), feeInvV = fa ? conv(fee * unitPx(fa), aCcy(fa), aCcy(inv)) : 0;
+          const payC = sell ? tot : round8(tot + (fa ? 0 : fee));   // 买入：成交金额 + 并进的手续费 = 付款账户共扣款
+          const totV = round8(payC * cpx), totInv = conv(totV, aCcy(cash), aCcy(inv)), feeInvV = fa ? conv(fee * unitPx(fa), aCcy(fa), aCcy(inv)) : 0;
           const costPU = sell && !invBal ? sellCostPU(f) : 0;
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           // 改成买卖之前的原记录（普通转账），用于「撤回」
           const pre = ex ? (ex.trade ? ex.preTrade || null : ex.type === 'transfer' ? (({ log, preTrade, ...r }) => r)(old) : null) : null;
           if (ex) applyTx(ex, -1);
-          const fu = qtyUnit(f), tu = qtyUnit(to), outQ = sell ? qty : tot, feeFromF = fa && fa.id === f.id ? fee : 0;
+          const fu = qtyUnit(f), tu = qtyUnit(to), outQ = sell ? qty : payC, feeFromF = fa && fa.id === f.id ? fee : 0;
           const undo = () => { if (ex) applyTx(ex, 1); };
           if (fu && outQ + feeFromF > (+f.qty || 0) + 1e-9) {
             const hq = vm && sell ? money((+f.qty || 0) * up, { ccy: aCcy(f), raw: true }) : `${trim8(+f.qty || 0)} ${fu}`;
