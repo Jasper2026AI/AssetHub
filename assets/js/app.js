@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2231,7 +2231,7 @@
     const lg = (x.log || []).slice().reverse().find(e => e.act === 'edit' && (e.diffs || []).some(d => d[0] === 'trade' && !d[1] && d[2]));
     if (!lg) return null;
     const o = JSON.parse(JSON.stringify(x));
-    ['log', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'dilOn', 'dilPrev', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
+    ['log', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'dilOn', 'dilPrev', 'dilSetPrev', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
     lg.diffs.forEach(([k, a]) => { if (a === '' || a == null) delete o[k]; else o[k] = a; });
     const f = findAsset(o.accountId), to = findAsset(o.toId);
     if (!f || !to || o.type !== 'transfer') return null;
@@ -2298,7 +2298,7 @@
       { k: 'wh', label: t('colWh'), th: whFilterHTML(true), tdCls: 'wh', td: r => (r.a.warehouse ? esc(r.a.warehouse) : '<span class="dim">—</span>') },
       { k: 'qty', label: t('colQty'), th: t('colQty'), thCls: 'r', tdCls: 'r num', td: r => `${qtyStr(r.a)}${unitSuffix(r.a)}` },
       { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); if (isValA(r.a)) return valCostCell(r.a, x); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: pxMax(conv(+r.a.cost || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: pxMax(+r.a.cost || 0) })}</small>` : ''); } },
-      { k: 'dil', label: t('colDil'), th: t('colDil'), thCls: 'r', tdCls: 'r num muted', td: r => { const d = dilOf(r.a), x = cc(r); if (d == null) return '<span class="dim">—</span>'; const dv = conv(d, x.ccy); return money(dv, { max: pxMax(dv) }) + (x.orig ? `<small>${money(d, { ccy: x.ccy, max: pxMax(d) })}</small>` : ''); } },
+      { k: 'dil', label: t('colDil'), th: t('colDil'), thCls: 'r', tdCls: 'r num muted', td: r => { const d = dilShow(r.a), x = cc(r); if (d == null) return '<span class="dim">—</span>'; const dv = conv(d, x.ccy); return money(dv, { max: pxMax(dv) }) + (x.orig ? `<small>${money(d, { ccy: x.ccy, max: pxMax(d) })}</small>` : ''); } },
       { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); if (isValA(r.a)) return `<span class="dim">${t('byValue')}</span>`; return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: pxMax(conv(+r.a.price || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: pxMax(+r.a.price || 0) })}</small>` : '') + extTag(r.a) + srcTag(r.a); } },
       Object.assign({ k: 'val', label: t('colValue'), tdCls: r => `r num strong ${r.v < 0 ? 'down' : ''}`, td: r => { const x = cc(r); return `${money(r.v, { max: 2 })}${x.orig ? `<small>${money(aVal(r.a), { ccy: x.ccy, max: 2 })}</small>` : ''}`; } }, sortTh('val', t('colValue'))),
       Object.assign({ k: 'day', label: t('colDay'), tdCls: r => `r num ${upDown(r.day)}`, td: r => `${dayCell(r.day, r.dayPct)}${resetDayBtn(r.a, r.day)}` }, sortTh('day', t('colDay'))),
@@ -2334,7 +2334,7 @@
               ${RM[a.id] ? `<div class="p num ${upDown(RM[a.id])}">${t('realized')} ${money(RM[a.id], { sign: true })}</div>` : ''}</div></div>
           <div class="hc-grid">
             <div><div class="l">${bal ? t('cashBalance') : t('colQty')}</div><div class="x num">${qtyStr(a)}${unitSuffix(a)}</div></div>
-            <div><div class="l">${isValA(a) ? t('totalCost') : t('colCost')}</div><div class="x num">${bal ? '—' : isValA(a) ? money(aCostD(a)) : money(conv(+a.cost || 0, aCcy(a)), { max: pxMax(conv(+a.cost || 0, aCcy(a))) }) + (dilOf(a) != null ? `<small class="dim">${t('dilShort')} ${money(conv(dilOf(a), aCcy(a)), { max: pxMax(conv(dilOf(a), aCcy(a))) })}</small>` : '')}</div></div>
+            <div><div class="l">${isValA(a) ? t('totalCost') : t('colCost')}</div><div class="x num">${bal ? '—' : isValA(a) ? money(aCostD(a)) : money(conv(+a.cost || 0, aCcy(a)), { max: pxMax(conv(+a.cost || 0, aCcy(a))) }) + (dilShow(a) != null ? `<small class="dim">${t('dilShort')} ${money(conv(dilShow(a), aCcy(a)), { max: pxMax(conv(dilShow(a), aCcy(a))) })}</small>` : '')}</div></div>
             <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : isValA(a) ? `<span class="dim">${t('byValue')}</span>` : money(conv(+a.price || 0, aCcy(a)), { max: pxMax(conv(+a.price || 0, aCcy(a))) }) + extTag(a) + srcTag(a)}</div></div>
           </div>
           ${a.warehouse ? `<div class="hc-wh">${ic('db')}${esc(a.warehouse)}</div>` : ''}
@@ -2381,6 +2381,8 @@
   /** 设置：持仓均价不含买入手续费（和券商「平均价」一致）。存在账本里，随云同步 */
   const costExFee = () => !!DB.meta.costExFee;
   /** 摊薄成本（和券商 Diluted cost 一致）=（持仓成本 + 待摊手续费 − 已实现盈亏 − 分红）÷ 持股数；dilAdj 累计「已实现 + 分红」，清仓归零 */
+  /** 列表里只在「手动填过起点」或「被卖出 / 分红自动调整过」时显示摊薄成本，其余显示 — */
+  const dilShow = a => { const d = dilOf(a); return d != null && (a.dilSet || Math.abs(+a.dilAdj || 0) > 1e-9) ? d : null; };
   const dilOf = a => { const q = +a.qty || 0; if (!a || isBalance(a) || isValA(a) || q <= 1e-12) return null; return (q * (+a.cost || 0) + (+a.feePool || 0) - (+a.dilAdj || 0)) / q; };
   /** 按市值记的资产（不填数量）：成本列显示总成本，单价列显示「按市值」 */
   const isValA = a => !!(a && a.noQty && !isBalance(a));
@@ -4356,7 +4358,7 @@
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           if (ex) applyTx(ex, -1);
-          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'dilOn', 'dilPrev', 'divOf', 'divV'].forEach(k => delete tx[k]);
+          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'dilOn', 'dilPrev', 'dilSetPrev', 'divOf', 'divV'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
           delete tx.appliedPx; delete tx.appliedCost;
           const dv = tx.type === 'income' && tx.cat === 'invest' ? $('#tf-div', m).value : '', da = dv ? findAsset(dv) : null;
@@ -4415,9 +4417,9 @@
           if (!f || !tx.dilOn || tx.trade !== 'sell' || tx.realized == null) return;
           if (sign > 0) {
             f.dilAdj = round8((+f.dilAdj || 0) + (+tx.realized || 0));
-            if ((+f.qty || 0) <= 1e-12) { tx.dilPrev = f.dilAdj; f.dilAdj = 0; } else delete tx.dilPrev;
+            if ((+f.qty || 0) <= 1e-12) { tx.dilPrev = f.dilAdj; tx.dilSetPrev = !!f.dilSet; f.dilAdj = 0; f.dilSet = false; } else { delete tx.dilPrev; delete tx.dilSetPrev; }
           } else {
-            if (tx.dilPrev != null) f.dilAdj = tx.dilPrev;
+            if (tx.dilPrev != null) { f.dilAdj = tx.dilPrev; f.dilSet = !!tx.dilSetPrev; }
             f.dilAdj = round8((+f.dilAdj || 0) - (+tx.realized || 0));
           }
         }
@@ -4653,7 +4655,7 @@
           if (dRaw && !bal && !vm) {
             const D = parseNum(dRaw);
             if (isNaN(D)) { toast(t('errAmount'), 'err'); $('#af-dil', m).focus(); return; }
-            if ((+a.qty || 0) > 1e-12) { a.dilAdj = round8(a.qty * (+a.cost || 0) + (ex ? +ex.feePool || 0 : 0) - D * a.qty); dilSet = D; }
+            if ((+a.qty || 0) > 1e-12) { a.dilAdj = round8(a.qty * (+a.cost || 0) + (ex ? +ex.feePool || 0 : 0) - D * a.qty); a.dilSet = true; dilSet = D; }
           }
           if (ex) {
             if (ex.price !== a.price) a.updatedAt = Date.now();
