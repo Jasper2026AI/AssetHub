@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '8.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -3947,7 +3947,9 @@
             // 买入：成交金额不含手续费，手续费从付款账户另扣；卖出：实际到账是扣完手续费的净额
             totInv: A.inv && A.cash ? conv((trade === 'buy' ? tot + (feeSep ? 0 : fee) : tot) * cpx, aCcy(A.cash), aCcy(A.inv)) : 0 });
         };
-        const autoTot = c => { const mf = c.feeSep ? 0 : c.fee; return c.gross > 0 ? round8(Math.max(0, trade === 'sell' ? c.gross - mf : c.gross)) : 0; };
+        /** 现金类按币种的最小单位取整（券商按分扣款 / 到账，避免余额里留下 0.00376412 这种尾数）；按数量记的（如 USDT 资产）保留 8 位 */
+        const cashRound = (c, n) => { if (!c.cash || qtyUnit(c.cash)) return round8(n); const d = ['JPY', 'KRW', 'VND', 'IDR'].includes(aCcy(c.cash)) ? 0 : 2, k = 10 ** d; return Math.round((n + Number.EPSILON) * k) / k; };
+        const autoTot = c => { const mf = c.feeSep ? 0 : c.fee; return c.gross > 0 ? cashRound(c, Math.max(0, trade === 'sell' ? c.gross - mf : c.gross)) : 0; };
         const setF = (id, n) => { $(id, m).value = n > 0 ? trim8(round8(n)) : ''; };
         /** 切换模式：普通 ⇄ 买卖时把已填的数量 / 金额 / 手续费带过去；编辑旧转账改成买卖时按原记录推算成交价 */
         const setTrade = v => {
@@ -4033,7 +4035,7 @@
           if (!inv || !cash) { pv.innerHTML = ''; pv.style.display = 'none'; return; }
           if (badDir(inv, cash)) rows.push(`<div class="tr-warn">${t(sell ? 'errSellInv' : 'errBuyInv')}</div>`);
           else if (c.qty > 0 && (c.px > 0 || c.tot > 0)) {
-            if (c.gross > 0 && (sell || Math.abs(c.gross - c.tot) > 1e-8)) rows.push(row(t('tradeGross'), fc(c.gross)));
+            if (c.gross > 0 && (sell || Math.abs(cashRound(c, c.gross) - c.tot) > 1e-8)) rows.push(row(t('tradeGross'), fc(c.gross)));
             if (!sell && c.tot > 0) rows.push(row(t('tradePayAll', { n: esc(cash.name) }), `${fc(c.pay)}${!c.feeSep && c.fee > 0 ? ` <small class="dim">(${t('tradePayParts', { a: fc(c.tot), f: fc(c.fee) })})</small>` : ''}`));
             const feeInv = c.fa && c.fa.id === inv.id ? c.fee : 0;   // 手续费直接从这项资产里扣（如用股票 / 币本身付手续费）
             if (sell) {
