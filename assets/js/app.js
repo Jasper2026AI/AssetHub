@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2231,7 +2231,7 @@
     const lg = (x.log || []).slice().reverse().find(e => e.act === 'edit' && (e.diffs || []).some(d => d[0] === 'trade' && !d[1] && d[2]));
     if (!lg) return null;
     const o = JSON.parse(JSON.stringify(x));
-    ['log', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
+    ['log', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'dilOn', 'dilPrev', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'fromUnit', 'toUnit', 'inCost', 'feeUnit', 'feeCcy', 'recvDiff'].forEach(k => delete o[k]);
     lg.diffs.forEach(([k, a]) => { if (a === '' || a == null) delete o[k]; else o[k] = a; });
     const f = findAsset(o.accountId), to = findAsset(o.toId);
     if (!f || !to || o.type !== 'transfer') return null;
@@ -2298,6 +2298,7 @@
       { k: 'wh', label: t('colWh'), th: whFilterHTML(true), tdCls: 'wh', td: r => (r.a.warehouse ? esc(r.a.warehouse) : '<span class="dim">—</span>') },
       { k: 'qty', label: t('colQty'), th: t('colQty'), thCls: 'r', tdCls: 'r num', td: r => `${qtyStr(r.a)}${unitSuffix(r.a)}` },
       { k: 'cost', label: t('colCost'), th: t('colCost'), thCls: 'r', tdCls: 'r num muted', td: r => { const x = cc(r); if (isValA(r.a)) return valCostCell(r.a, x); return x.bal ? `<span class="dim">—</span><small>${x.ccy}</small>` : money(conv(+r.a.cost || 0, x.ccy), { max: pxMax(conv(+r.a.cost || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.cost || 0, { ccy: x.ccy, max: pxMax(+r.a.cost || 0) })}</small>` : ''); } },
+      { k: 'dil', label: t('colDil'), th: t('colDil'), thCls: 'r', tdCls: 'r num muted', td: r => { const d = dilOf(r.a), x = cc(r); if (d == null) return '<span class="dim">—</span>'; const dv = conv(d, x.ccy); return money(dv, { max: pxMax(dv) }) + (x.orig ? `<small>${money(d, { ccy: x.ccy, max: pxMax(d) })}</small>` : ''); } },
       { k: 'price', label: t('colPrice'), th: t('colPrice'), thCls: 'r', tdCls: 'r num strong', td: r => { const x = cc(r); if (isValA(r.a)) return `<span class="dim">${t('byValue')}</span>`; return x.bal ? '<span class="dim">—</span>' : money(conv(+r.a.price || 0, x.ccy), { max: pxMax(conv(+r.a.price || 0, x.ccy)) }) + (x.orig ? `<small>${money(+r.a.price || 0, { ccy: x.ccy, max: pxMax(+r.a.price || 0) })}</small>` : '') + extTag(r.a) + srcTag(r.a); } },
       Object.assign({ k: 'val', label: t('colValue'), tdCls: r => `r num strong ${r.v < 0 ? 'down' : ''}`, td: r => { const x = cc(r); return `${money(r.v, { max: 2 })}${x.orig ? `<small>${money(aVal(r.a), { ccy: x.ccy, max: 2 })}</small>` : ''}`; } }, sortTh('val', t('colValue'))),
       Object.assign({ k: 'day', label: t('colDay'), tdCls: r => `r num ${upDown(r.day)}`, td: r => `${dayCell(r.day, r.dayPct)}${resetDayBtn(r.a, r.day)}` }, sortTh('day', t('colDay'))),
@@ -2333,7 +2334,7 @@
               ${RM[a.id] ? `<div class="p num ${upDown(RM[a.id])}">${t('realized')} ${money(RM[a.id], { sign: true })}</div>` : ''}</div></div>
           <div class="hc-grid">
             <div><div class="l">${bal ? t('cashBalance') : t('colQty')}</div><div class="x num">${qtyStr(a)}${unitSuffix(a)}</div></div>
-            <div><div class="l">${isValA(a) ? t('totalCost') : t('colCost')}</div><div class="x num">${bal ? '—' : isValA(a) ? money(aCostD(a)) : money(conv(+a.cost || 0, aCcy(a)), { max: pxMax(conv(+a.cost || 0, aCcy(a))) })}</div></div>
+            <div><div class="l">${isValA(a) ? t('totalCost') : t('colCost')}</div><div class="x num">${bal ? '—' : isValA(a) ? money(aCostD(a)) : money(conv(+a.cost || 0, aCcy(a)), { max: pxMax(conv(+a.cost || 0, aCcy(a))) }) + (dilOf(a) != null ? `<small class="dim">${t('dilShort')} ${money(conv(dilOf(a), aCcy(a)), { max: pxMax(conv(dilOf(a), aCcy(a))) })}</small>` : '')}</div></div>
             <div><div class="l">${t('colPrice')}</div><div class="x num">${bal ? '—' : isValA(a) ? `<span class="dim">${t('byValue')}</span>` : money(conv(+a.price || 0, aCcy(a)), { max: pxMax(conv(+a.price || 0, aCcy(a))) }) + extTag(a) + srcTag(a)}</div></div>
           </div>
           ${a.warehouse ? `<div class="hc-wh">${ic('db')}${esc(a.warehouse)}</div>` : ''}
@@ -2379,6 +2380,8 @@
     : inline ? `${money(ch, { sign: true })} (${pct(p)})` : `${money(ch, { sign: true })}<small class="${upDown(ch)}">${pct(p)}</small>`);
   /** 设置：持仓均价不含买入手续费（和券商「平均价」一致）。存在账本里，随云同步 */
   const costExFee = () => !!DB.meta.costExFee;
+  /** 摊薄成本（和券商 Diluted cost 一致）=（持仓成本 + 待摊手续费 − 已实现盈亏 − 分红）÷ 持股数；dilAdj 累计「已实现 + 分红」，清仓归零 */
+  const dilOf = a => { const q = +a.qty || 0; if (!a || isBalance(a) || isValA(a) || q <= 1e-12) return null; return (q * (+a.cost || 0) + (+a.feePool || 0) - (+a.dilAdj || 0)) / q; };
   /** 按市值记的资产（不填数量）：成本列显示总成本，单价列显示「按市值」 */
   const isValA = a => !!(a && a.noQty && !isBalance(a));
   const valCostCell = (a, x) => `${money(aCostD(a))}<small>${t('totalCost')}</small>`;
@@ -3812,6 +3815,9 @@
         </div>
         <div class="hint" id="tf-fee-hint" style="margin:-6px 0 12px"></div></div>
       <div class="field" id="tf-cats-wrap"><label>${t('category')}</label><div class="cat-grid" id="tf-cats"></div></div>
+      <div class="field" id="tf-div-row" style="display:none"><label>${t('divOf')} <span class="dim">· ${t('codeOpt')}</span></label>
+        <select class="input" id="tf-div"><option value="">${t('divOfNone')}</option>${DB.assets.filter(a => !isBalance(a) && !isValA(a)).map(a => `<option value="${a.id}" ${st.divOf === a.id ? 'selected' : ''}>${esc(a.name)}${a.code ? ' · ' + esc(a.code) : ''}</option>`).join('')}</select>
+        <div class="hint">${t('divOfHint')}</div></div>
       <div class="field tf-sub" id="tf-sub-wrap" style="display:none"><label>${t('subLink')} <span class="dim">· ${t('subLinkTip')}</span></label>
         <select class="input" id="tf-sub">${subOptions((ex && ex.subId) || presetSub || '')}</select>
         <div class="tf-new" id="tf-sub-new" style="display:none;margin:10px 0 0">
@@ -3842,6 +3848,8 @@
           $('#tf-cats', m).innerHTML = cats.map(c => `<button type="button" class="cat ${st.cat === c ? 'on' : ''}" data-v="${c}"><span class="e">${CAT_ICON[c]}</span>${catName(c)}</button>`).join('');
         };
         const isTr = () => st.type === 'transfer';
+        /** 收入选「投资收益」时可以关联「来自哪只股票」，用于摊薄成本 */
+        const divSync = () => { $('#tf-div-row', m).style.display = st.type === 'income' && st.cat === 'invest' ? '' : 'none'; };
         /** 同步余额：现金 / 负债按金额加减；其他资产按现价折算成数量加减（收入按价值计入成本，支出不改平均成本） */
         const syncRow = () => {
           const a = findAsset($('#tf-acct', m).value), row = $('#tf-sync-row', m), sub = $('#tf-sync-sub', m);
@@ -4078,7 +4086,7 @@
           acct.innerHTML = tr ? balOptions(cur) : accountOptions(cur);
           $('#tf-ccy', m).disabled = tr;
           if (!tr) { drawCats(); $('#tf-ccy', m).style.display = ''; $('#tf-unit', m).style.display = 'none'; $('#tf-val-hint', m).style.display = 'none'; }
-          syncRow(); trSync(); tradeSync();
+          syncRow(); trSync(); tradeSync(); divSync();
         };
         // 关联订阅（只在支出时出现）：选已有订阅 → 续期并更新到期时间；选“新建订阅” → 同时建一个订阅
         let subRenew = (ex && ex.subRenew) || 'cycle', subCyc = 'month';
@@ -4219,6 +4227,7 @@
           }
           if (pre) tx.preTrade = pre;
           if (vm) tx.tradeMv = round8(raw);
+          if (sell && !invBal) tx.dilOn = true;
           if (isNew) {
             DB.assets.push(to);
             logOp('asset', to, 'create', ASSET_FIELDS.filter(k => !['locked'].includes(k) && to[k] !== '' && to[k] != null).map(k => [k, '', to[k]]), { tx: recTitle('tx', tx) });
@@ -4238,6 +4247,7 @@
         $('#tf-cats', m).addEventListener('click', e => {
           const b = e.target.closest('[data-v]'); if (!b) return;
           st.cat = b.dataset.v; $$('#tf-cats .cat', m).forEach(x => x.classList.toggle('on', x === b));
+          divSync();
         });
         $('#tf-ccy', m).addEventListener('change', e => {
           ccyTouched = true;
@@ -4346,9 +4356,11 @@
           const tx = ex || { id: uid(), createdAt: Date.now() };
           const old = ex ? JSON.parse(JSON.stringify(ex)) : null, bal0 = balSnapshot();
           if (ex) applyTx(ex, -1);
-          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade', 'tradeMv', 'feePool', 'feeRel'].forEach(k => delete tx[k]);
+          ['toId', 'toAmount', 'toCcy', 'fee', 'feeId', 'feeCcy', 'feeUnit', 'value', 'feeValue', 'fromUnit', 'toUnit', 'inCost', 'recvDiff', 'trade', 'tradePx', 'tradePxCcy', 'tradeFee', 'tradeCls', 'costBasis', 'realized', 'realizedCcy', 'preTrade', 'tradeMv', 'feePool', 'feeRel', 'dilOn', 'dilPrev', 'divOf', 'divV'].forEach(k => delete tx[k]);
           Object.assign(tx, { date, type: st.type, cat: st.cat, amount, ccy, accountId: $('#tf-acct', m).value || '', note: $('#tf-note', m).value.trim(), applied: false, appliedDelta: 0 });
           delete tx.appliedPx; delete tx.appliedCost;
+          const dv = tx.type === 'income' && tx.cat === 'invest' ? $('#tf-div', m).value : '', da = dv ? findAsset(dv) : null;
+          if (da) { tx.divOf = da.id; tx.divV = round8(conv(tx.amount, tx.ccy, aCcy(da))); }
           const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;
           if (a && $('#tf-sync', m).checked) {
             if (isBalance(a)) {
@@ -4397,12 +4409,25 @@
           if (tx.inCost != null && !isBalance(to) && nq > 1e-12) to.cost = round8((q * (+to.cost || 0) + (+tx.inCost || 0) * sign) / nq);
           to.qty = round8(nq);
           if (tx.feePool) to.feePool = round8(Math.max(0, (+to.feePool || 0) + (+tx.feePool || 0) * sign));   // 买入：手续费不进均价时记为待摊
+        },
+        () => {
+          // 摊薄成本：卖出的已实现盈亏计入 dilAdj；卖到清仓时归零（记下清仓前的值，回滚时恢复）
+          if (!f || !tx.dilOn || tx.trade !== 'sell' || tx.realized == null) return;
+          if (sign > 0) {
+            f.dilAdj = round8((+f.dilAdj || 0) + (+tx.realized || 0));
+            if ((+f.qty || 0) <= 1e-12) { tx.dilPrev = f.dilAdj; f.dilAdj = 0; } else delete tx.dilPrev;
+          } else {
+            if (tx.dilPrev != null) f.dilAdj = tx.dilPrev;
+            f.dilAdj = round8((+f.dilAdj || 0) - (+tx.realized || 0));
+          }
         }
       ];
       // 回滚时倒序执行，手续费账户就是转入资产（如买 BTC 手续费扣 BTC）时平均成本也能完全还原
       (sign < 0 ? steps.reverse() : steps).forEach(fn => fn());
       return;
     }
+    // 分红关联了股票：计入那只股票的摊薄调整（和券商的摊薄成本一样扣掉分红）
+    if (tx.divOf && tx.divV) { const da = findAsset(tx.divOf); if (da) da.dilAdj = round8((+da.dilAdj || 0) + (+tx.divV || 0) * sign); }
     if (!tx.applied || !tx.accountId) return;
     const a = findAsset(tx.accountId);
     if (!a) return;
@@ -4447,6 +4472,7 @@
           <datalist id="af-unit-list">${['oz', 'g', 'kg'].concat(t('unitPresets').split(',')).map(u => `<option value="${esc(u)}">`).join('')}</datalist></div>
         <div class="field hide-bal" id="af-cost-wrap"><label id="af-cost-l">${t('avgCost')}</label><input class="input num" id="af-cost" inputmode="decimal" autocomplete="off" value="${num(f.cost)}" placeholder="0.00"></div>
       </div>
+      <div class="field hide-bal" id="af-dil-wrap"><label>${t('dilCost')} <span class="dim">· ${t('codeOpt')}</span></label><input class="input num" id="af-dil" inputmode="decimal" autocomplete="off" value="" placeholder="${ex && dilOf(ex) != null ? esc(trim8(round8(dilOf(ex)))) : '0.00'}"><div class="hint">${t('dilCostHint')}${ex && dilOf(ex) != null ? ' ' + t('dilCostNow', { v: esc(trim8(+dilOf(ex).toFixed(4))) }) : ''}</div></div>
       <div class="field hide-bal"><label id="af-price-l">${t('curPrice')}</label><div class="input-group">
         <input class="input num" id="af-price" inputmode="decimal" autocomplete="off" value="${num(f.price)}" placeholder="0.00">
         <button type="button" class="btn btn-soft" id="af-fetch">${ic('bolt')}${t('fetchOnline')}</button></div></div>
@@ -4499,6 +4525,7 @@
           $('#af-price-l', m).textContent = vm ? t('mktValue') : t('curPrice');
           $('#af-cost-l', m).textContent = vm ? t('totalCost') : t('avgCost');
           $('#af-fetch', m).style.display = vm ? 'none' : '';
+          $('#af-dil-wrap', m).style.display = vm ? 'none' : '';
           const showUnit = !bal && !vm;   // 所有非现金类资产都可以填计量单位（选填）
           $('#af-unit-wrap', m).style.display = showUnit ? '' : 'none';
           $('#af-cost-wrap', m).style.gridColumn = showUnit ? '1 / -1' : '';
@@ -4620,10 +4647,19 @@
             if (a.cls.includes('liability') && a.qty > 0) a.qty = -a.qty;
           }
           if (bal) a.unit = '';
+          // 摊薄成本（选填，照券商填）：换算成「已实现 + 分红」的累计调整，之后的卖出 / 分红在此基础上自动更新
+          const dRaw = $('#af-dil', m).value.trim(), oldDil = ex ? dilOf(ex) : null;
+          let dilSet = null;
+          if (dRaw && !bal && !vm) {
+            const D = parseNum(dRaw);
+            if (isNaN(D)) { toast(t('errAmount'), 'err'); $('#af-dil', m).focus(); return; }
+            if ((+a.qty || 0) > 1e-12) { a.dilAdj = round8(a.qty * (+a.cost || 0) + (ex ? +ex.feePool || 0 : 0) - D * a.qty); dilSet = D; }
+          }
           if (ex) {
             if (ex.price !== a.price) a.updatedAt = Date.now();
             if (ex.code !== a.code || ex.unit !== a.unit) { a.prevClose = 0; a.prevDay = ''; }
             const d = diffOf(ex, a, ASSET_FIELDS);
+            if (dilSet != null && (oldDil == null || Math.abs(oldDil - dilSet) > 1e-9)) d.push(['dilCost', oldDil == null ? '' : round8(oldDil), dilSet]);
             Object.assign(ex, a);
             if (d.length) logOp('asset', ex, 'edit', d);
             // 今天才录入的手动资产：今天的编辑都算“录入设置”，不计入今日盈亏
@@ -4691,7 +4727,7 @@
     if (f === 'noQty') return v ? t('fillVal') : t('fillQty');
     if (f === 'locked') return v ? t('lockYes') : t('lockNo');
     if (f === 'unit') return esc(t('unit_' + v));
-    if (typeof v === 'number') return hidden() && ['qty', 'cost', 'price', 'amount', 'toAmount', 'fee', 'tradePx', 'tradeFee'].includes(f) ? MASK : fmtNum(v, 0, 8);
+    if (typeof v === 'number') return hidden() && ['qty', 'cost', 'price', 'amount', 'toAmount', 'fee', 'tradePx', 'tradeFee', 'dilCost'].includes(f) ? MASK : fmtNum(v, 0, 8);
     return esc(String(v));
   }
   function logEntryHTML(e, kind, withName) {
