@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -272,7 +272,7 @@
       const q = +a.qty || 0, c = +a.cost || 0, d = [];
       if (Math.abs(q - b.q) > 1e-9) d.push(['qty', b.q, q]);
       if (!isBalance(a) && Math.abs(c - b.c) > 1e-9) d.push(['cost', b.c, c]);
-      if (d.length) logOp('asset', a, 'balByTx', d, { tx: txRec ? recTitle('tx', txRec) : '', txAct: act });
+      if (d.length) logOp('asset', a, 'balByTx', d, { tx: txRec ? recTitle('tx', txRec) : '', txAct: act, txT: txRec ? txRec.type : '' });
     });
   }
   const syncReady = () => !!(S().gistToken && S().gistId);
@@ -1148,13 +1148,16 @@
     const ref = dayRef(a, keys), ccy = aCcy(a);
     if (isBalance(a)) {
       // 现金 / 余额类：今天的转账和买卖只是把钱挪到别处（如买股票），不算这个账户的「今日变化」；收入、支出照常算
+      //   按这个账户今天的余额变动记录算：来自转账 / 买卖的变动（含今天新增、编辑、删除旧记录引起的）都扣掉
       const tk = todayKey(), t0 = new Date(tk + 'T00:00:00').getTime();
       let flow = 0;
-      if (!(a.dayBase && a.dayBase.d === tk)) DB.txs.forEach(x => {
-        if (x.type !== 'transfer' || !x.applied || !(x.date === tk || (x.createdAt || 0) >= t0)) return;
-        if (x.accountId === a.id) flow -= (+x.amount || 0) + (x.feeId ? 0 : +x.fee || 0);
-        if (x.feeId === a.id) flow -= +x.fee || 0;
-        if (x.toId === a.id) flow += +x.toAmount || 0;
+      if (!(a.dayBase && a.dayBase.d === tk)) (a.log || []).forEach(e => {
+        if (e.ts < t0 || e.act !== 'balByTx' || !e.diffs) return;
+        const ex = e.extra || {};
+        let tt = ex.txT;
+        if (!tt && ex.tx) { const m = DB.txs.find(x => recTitle('tx', x) === ex.tx); tt = m ? m.type : /转账|买入|卖出|Transfer|Buy|Sell/.test(ex.tx) ? 'transfer' : ''; }   // 旧记录没存类型：按标题找
+        if (tt !== 'transfer') return;
+        const d = e.diffs.find(x => x[0] === 'qty'); if (d) flow += (+d[2] || 0) - (+d[1] || 0);
       });
       const ch = conv((+a.qty || 0) - flow - ref, ccy);
       return { ch, base: conv(ref, ccy), pct: ref ? (ch / Math.abs(conv(ref, ccy))) * 100 : 0 };
