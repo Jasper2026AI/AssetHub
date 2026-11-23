@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.8';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1147,8 +1147,17 @@
     keys = keys || snapKeys();
     const ref = dayRef(a, keys), ccy = aCcy(a);
     if (isBalance(a)) {
-      const ch = conv((+a.qty || 0) - ref, ccy);
-      return { ch, pct: ref ? (ch / Math.abs(conv(ref, ccy))) * 100 : 0 };
+      // 现金 / 余额类：今天的转账和买卖只是把钱挪到别处（如买股票），不算这个账户的「今日变化」；收入、支出照常算
+      const tk = todayKey(), t0 = new Date(tk + 'T00:00:00').getTime();
+      let flow = 0;
+      if (!(a.dayBase && a.dayBase.d === tk)) DB.txs.forEach(x => {
+        if (x.type !== 'transfer' || !x.applied || !(x.date === tk || (x.createdAt || 0) >= t0)) return;
+        if (x.accountId === a.id) flow -= (+x.amount || 0) + (x.feeId ? 0 : +x.fee || 0);
+        if (x.feeId === a.id) flow -= +x.fee || 0;
+        if (x.toId === a.id) flow += +x.toAmount || 0;
+      });
+      const ch = conv((+a.qty || 0) - flow - ref, ccy);
+      return { ch, base: conv(ref, ccy), pct: ref ? (ch / Math.abs(conv(ref, ccy))) * 100 : 0 };
     }
     // 和券商一致：今天买入的部分按成交价算（不是昨收），今天卖出的部分算到成交价为止。
     //   今日盈亏 = 开盘前持有 ×（现价 − 起点）+ Σ今天买入 ×（现价 − 买价）+ Σ今天卖出 ×（卖价 − 起点）
