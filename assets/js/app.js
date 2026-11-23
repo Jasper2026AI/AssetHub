@@ -85,9 +85,9 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.4';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
-  const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist'];
+  const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
 
   const ICON = {
@@ -232,7 +232,8 @@
      DB.meta.updatedAt：本机资产 / 记账最后一次被修改的时间
      S().syncedStamp：最近一次与云端一致时的版本时间
      本机有改动 = updatedAt > syncedStamp；云端有改动 = 云端 updatedAt > syncedStamp */
-  function markDirty() { DB.meta.updatedAt = Date.now(); }
+  /** 标记本机有改动：时间戳只增不减（别的设备时钟比本机快时，也保证比云端已有的时间新） */
+  function markDirty() { DB.meta.updatedAt = Math.max(Date.now(), (DB.meta.updatedAt || 0) + 1, (S().syncedStamp || 0) + 1); }
   /** 用户数据（资产 / 记账 / 账本信息）发生变化时调用：保存 + 稍后自动同步 */
   function commit() { markDirty(); save(); scheduleSync(); }
   /* ---- 操作记录 ----
@@ -328,6 +329,7 @@
     S().snapsGist = S().gistId;
     pruneSnaps();
     S().syncedStamp = c.meta.updatedAt || 0;
+    DB.meta.rev = c.meta.rev || ''; S().syncedRev = c.meta.rev || '';
   }
   /** 合并行情 API Key（每次同步都做，和资产数据谁新谁旧无关）：
       本机没填而云端有 → 用云端；两边都有 → 以最后修改的为准。返回 true 表示本机的 Key 更新，需要上传 */
@@ -362,12 +364,14 @@
   }
   async function pushCloud(interactive) {
     await ensureSyncKey(interactive);
+    // 每次上传生成新的版本号：几台设备之间用它判断云端有没有新数据，不再比较各设备的时钟（设备时间不准会漏拉）
+    DB.meta.rev = uid();
     const body = await encodeCloud(JSON.stringify(exportable(true)));
     SYNC.phase = 'push';    // 加密后再上传（含行情 API Key）
     const id = await Api.gistPush(S().gistToken, S().gistId, body, `AssetHub · ${bookName()}`);
     const pm = Api.gistPush.meta || {};
     S().lastPush = { at: pm.updated || '', ver: pm.version || '', ts: Date.now() };
-    S().gistId = id; S().snapsGist = id; S().syncedStamp = DB.meta.updatedAt || 0; S().gistLast = Date.now();
+    S().gistId = id; S().snapsGist = id; S().syncedStamp = DB.meta.updatedAt || 0; S().syncedRev = DB.meta.rev; S().gistLast = Date.now();
   }
   /* ================= 同步加密 =================
      云端 Gist 只保存密文 {assethub:'enc1', salt, iter, iv, data}：锁定密码 → PBKDF2 → AES-GCM。
@@ -681,7 +685,8 @@
     SYNC.busy = true; SYNC.state = 'busy'; renderSyncBtn();
     const inter = !opt.silent || !!opt.interactive;
     try {
-      const localDirty = (DB.meta.updatedAt || 0) > (S().syncedStamp || 0);
+      // 本机有没有未上传的改动：只要和上次同步时的时间戳不同就算（不比较大小，避免设备时钟不准漏传）
+      const localDirty = (DB.meta.updatedAt || 0) !== (S().syncedStamp || 0);
       if (!S().gistId) {                                       // 还没有 Gist：直接创建
         if (!DB.meta.updatedAt) markDirty();
         await pushCloud(inter); save();
@@ -703,7 +708,10 @@
         const sm = S().snapsGist === S().gistId ? mergeSnaps(cloud.snaps) : { changed: false, needPush: false };
         if (sm.changed) { pruneSnaps(); save(); }
         const cStamp = (cloud.meta && cloud.meta.updatedAt) || 0;
-        const cloudNew = (cStamp > (S().syncedStamp || 0) && cStamp !== DB.meta.updatedAt) || (!cStamp && !S().syncedStamp && !localDirty && (cloud.assets.length || cloud.txs.length || (cloud.subs || []).length));
+        // 云端是否有本机没同步过的新数据：优先看版本号（与设备时钟无关）；旧版本上传的数据没有版本号时，再按时间判断
+        const cRev = (cloud.meta && cloud.meta.rev) || '';
+        const revNew = !!cRev && cRev !== (S().syncedRev || '') && cRev !== (DB.meta.rev || '');
+        const cloudNew = revNew || (cStamp > (S().syncedStamp || 0) && cStamp !== DB.meta.updatedAt) || (!cStamp && !S().syncedStamp && !localDirty && (cloud.assets.length || cloud.txs.length || (cloud.subs || []).length));
         let action = 'none';
         const sw = S().switchPull; S().switchPull = false;
         if (sw && (cloud.assets.length || cloud.txs.length || (cloud.subs || []).length)) action = 'pull';
