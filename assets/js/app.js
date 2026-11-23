@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.5';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -366,6 +366,7 @@
     await ensureSyncKey(interactive);
     // 每次上传生成新的版本号：几台设备之间用它判断云端有没有新数据，不再比较各设备的时钟（设备时间不准会漏拉）
     DB.meta.rev = uid();
+    DB.meta.appVer = APP_VER;   // 记下上传时的程序版本：旧版本设备看到后会先要求更新，避免用旧逻辑覆盖云端
     const body = await encodeCloud(JSON.stringify(exportable(true)));
     SYNC.phase = 'push';    // 加密后再上传（含行情 API Key）
     const id = await Api.gistPush(S().gistToken, S().gistId, body, `AssetHub · ${bookName()}`);
@@ -678,6 +679,7 @@
   }
 
   /** 同步一次：自动判断该上传还是下载；两边都改过时让你选 */
+  const verNum = v => String(v).split('.').reduce((n, x, i) => n + (parseInt(x, 10) || 0) / Math.pow(1000, i), 0);
   async function syncNow(opt) {
     opt = opt || {};
     if (SYNC.busy) return;
@@ -703,6 +705,9 @@
         }
         const cloud = await decodeCloud(fresh.content, { interactive: inter, allowForce: true });
         if (!validData(cloud)) throw new Error('BAD_DATA');
+        // 云端是更新版本的程序上传的：本机先更新，不读也不写，避免旧版本的同步逻辑把别的设备的新记录覆盖掉
+        const cv = (cloud.meta && cloud.meta.appVer) || '';
+        if (cv && verNum(cv) > verNum(APP_VER)) { SYNC.needVer = cv; throw new Error('OLD_APP'); }
         const keysPush = mergeKeys(cloud) | mergeSrcs(cloud);
         // 每日快照每次同步都合并（不只在拉取时），并把本机较新的过去记录补传上去，几台设备的日历就会一致
         const sm = S().snapsGist === S().gistId ? mergeSnaps(cloud.snaps) : { changed: false, needPush: false };
@@ -748,6 +753,7 @@
       }
       SYNC.reenc = false; SYNC.state = 'err'; SYNC.lastErr = (e && e.message) || 'error'; SYNC.lastPhase = SYNC.phase;   // 存原始错误，显示时按当前语言翻译
       if (!opt.silent && e.message !== 'CANCEL') toast(t('syncFail') + ' · ' + syncErrNow(), 'err');
+      if (e && e.message === 'OLD_APP') { if (opt.silent) toast(syncErrNow(), 'err'); try { checkUpdate(); } catch (e3) { /* ignore */ } }
     }
     SYNC.busy = false; SYNC.lastCheck = Date.now(); renderSyncBtn();
     if (UI.page === 'settings') renderPage();
@@ -769,6 +775,7 @@
     if (m === 'NEED_PASS') return t('syncNeedPass');
     if (m === 'CANCEL') return t('syncCanceled');
     if (m === 'DEMO_BLOCK') return t('syncDemoBlock');
+    if (m === 'OLD_APP') return t('syncOldApp', { v: SYNC.needVer || '' });
     if (m === 'PASS_WRONG') return t('passWrong');
     if (m === 'CORRUPT') return t('syncCorrupt');
     if (m === 'ENC_VERIFY') return t('syncEncVerify');
