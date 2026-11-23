@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.6';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '9.7';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1150,8 +1150,25 @@
       const ch = conv((+a.qty || 0) - ref, ccy);
       return { ch, pct: ref ? (ch / Math.abs(conv(ref, ccy))) * 100 : 0 };
     }
-    const q = +a.qty || 0, ch = conv(q * ((+a.price || 0) - ref), ccy), base = conv(q * ref, ccy);
-    return { ch, pct: base ? (ch / Math.abs(base)) * 100 : 0 };
+    // 和券商一致：今天买入的部分按成交价算（不是昨收），今天卖出的部分算到成交价为止。
+    //   今日盈亏 = 开盘前持有 ×（现价 − 起点）+ Σ今天买入 ×（现价 − 买价）+ Σ今天卖出 ×（卖价 − 起点）
+    const tk = todayKey(), r = a.dayBase && a.dayBase.d === tk ? { pnl: (+a.qty || 0) * ((+a.price || 0) - ref), base: (+a.qty || 0) * ref } : tradePnl(a, ref, tk);
+    const ch = conv(r.pnl, ccy), base = conv(r.base, ccy);
+    return { ch, base, pct: base ? (ch / Math.abs(base)) * 100 : 0 };
+  }
+  /** 某段时间（from 起，含当天）的价格盈亏，和券商一致：期间买入的部分从买价算起，期间卖出的部分算到卖价为止。
+      = 期初持有 ×（现价 − 期初价）+ Σ买入 ×（现价 − 买价）+ Σ卖出 ×（卖价 − 期初价）；返回资产币种的 { pnl, base } */
+  function tradePnl(a, ref, from) {
+    const q = +a.qty || 0, px = +a.price || 0;
+    // qh = 期初就持有、到现在还在的数量（现有数量 − 期间买入）；卖出的部分单独算到卖价
+    let qh = q, extra = 0, extraBase = 0;
+    DB.txs.forEach(x => {
+      if (!x.trade || !x.applied || !x.date || x.date < from || !(+x.tradePx > 0) || (x.tradePxCcy && x.tradePxCcy !== aCcy(a))) return;
+      if (x.trade === 'buy' && x.toId === a.id) { const n = +x.toAmount || 0; qh -= n; extra += n * (px - x.tradePx); extraBase += n * x.tradePx; }
+      else if (x.trade === 'sell' && x.accountId === a.id) { const n = +x.amount || 0; extra += n * (x.tradePx - ref); extraBase += n * ref; }
+    });
+    if (qh < -1e-9) return { pnl: q * (px - ref), base: q * ref };   // 数量对不上（如期间另外转出过）：退回按现有数量算
+    return { pnl: qh * (px - ref) + extra, base: qh * ref + extraBase };
   }
   /** 单项资产累计变化：价格类 = 浮动盈亏（市值 − 成本）；现金 / 负债 = 当前余额 − 录入时余额 */
   function totalChange(a) {
@@ -1177,11 +1194,11 @@
     list.forEach(a => {
       if (isBalance(a)) return;
       let ref;
-      if (period === 'day') ref = dayRef(a, keys);
-      else ref = refPrice(a, start, keys);
-      const q = +a.qty || 0, p = +a.price || 0;
-      pnl += conv(q * (p - ref), aCcy(a));
-      base += conv(q * ref, aCcy(a));
+      if (period === 'day') { const d = dayChange(a, keys); pnl += d.ch; base += d.base || 0; return; }
+      ref = refPrice(a, start, keys);
+      const r = tradePnl(a, ref, start);
+      pnl += conv(r.pnl, aCcy(a));
+      base += conv(r.base, aCcy(a));
     });
     return { pnl, pct: base ? (pnl / Math.abs(base)) * 100 : 0 };
   }
