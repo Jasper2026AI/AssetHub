@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '10.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '10.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1097,14 +1097,17 @@
   function backShiftTx(o, n) {
     const tk = todayKey();
     const eff = x => {
-      if (!x || x.type === 'transfer' || !x.applied || !x.accountId || !x.date || x.date >= tk || !(+x.appliedDelta)) return null;
-      const a = findAsset(x.accountId); return a && isBalance(a) ? { a, du: +x.appliedDelta, D: x.date } : null;
+      if (!x || x.type === 'transfer' || !x.applied || !x.accountId || !x.date || !(+x.appliedDelta)) return null;
+      const a = findAsset(x.accountId); return a && isBalance(a) ? { a, du: +x.appliedDelta } : null;
     };
-    const eo = eff(o), en = eff(n);
-    if (eo && en && eo.a === en.a && eo.D === en.D && Math.abs(eo.du - en.du) < 1e-12) return;
+    // 这笔记录目前从哪天起算进了每天的记录：补记过的看 bs；没补记过（v10.0 之前的）从录入那天起
+    const incl = x => x.bs || (x.createdAt ? [x.date, ymd(new Date(x.createdAt))].sort().pop() : x.date);
+    const eo = eff(o), en = eff(n), io = eo ? incl(o) : '', inn = en ? n.date : '';
+    if (n) delete n.bs;
+    if (eo && en && eo.a === en.a && Math.abs(eo.du - en.du) < 1e-12 && io === inn) { if (inn < tk) n.bs = inn; return; }
     const shift = (a, du, D) => backdateVal(Object.assign({}, a, { qty: round8((+a.qty || 0) + du) }), { qty: +a.qty || 0, price: a.price }, D);
-    if (eo) shift(eo.a, -eo.du, eo.D);
-    if (en) shift(en.a, en.du, en.D);
+    if (eo && io < tk) shift(eo.a, -eo.du, io);
+    if (en && inn < tk) { shift(en.a, en.du, inn); n.bs = inn; }
   }
   /** 补记更新市值：把这次变化记到过去的某一天 D。D 当天记录这笔变化（日盈亏 / 走势），之后每天的记录整体平移同样的差额，
       今天的“今日盈亏”起点也随之平移（今天不再重复计入）。old = 更新前的 { qty, price } */
