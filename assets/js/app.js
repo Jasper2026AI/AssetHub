@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '10.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '10.3';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -2156,7 +2156,7 @@
   }
   const txCls = x => (x.type === 'income' ? 'up' : x.type === 'expense' ? 'down' : 'muted');
   /** 记账关联的订阅（小标签） */
-  const subLinkTag = x => (x.subId || x.refSub ? `<span class="sub-link" title="${t(x.refSub ? 'refSub' : 'subLink')}">${ic('repeat')}${x.refSub ? t('subBillRefund') + ' · ' : ''}${esc((findSub(x.subId || x.refSub) || {}).name || t('subDeleted'))}</span>` : '');
+  const subLinkTag = x => (x.subId || x.refSub ? `<span class="sub-link" title="${t(x.refSub ? 'refSub' : 'subLink')}">${ic('repeat')}${x.refSub ? t('subBillRefund') + ' · ' : ''}${esc(subLabel(findSub(x.subId || x.refSub)) || t('subDeleted'))}</span>` : '');
   function txRowHTML(x, withOps, batch) {
     const orig = x.ccy && x.ccy !== S().ccy;
     return `<div class="tx-row ${batch ? 'batch' : ''}">
@@ -3404,12 +3404,14 @@
   }
 
   /* ---- 记一笔：支出关联订阅（续期 / 新建） ---- */
-  function subOptions(sel) {
+  /** 订阅显示名：名称 + 副名称（同名订阅靠副名称区分） */
+  const subLabel = s => (s ? s.name + (s.alias ? ' · ' + s.alias : '') : '');
+  function subOptions(sel, refund) {
     const groups = {};
     DB.subs.forEach(s => { const g = s.archived ? '\u0000arch' : s.cat || ''; (groups[g] = groups[g] || []).push(s); });
-    return `<option value="">${t('subLinkNone')}</option><option value="__new" ${sel === '__new' ? 'selected' : ''}>${t('subLinkNew')}</option>` +
+    return (refund ? `<option value="">${t('divOfNone')}</option>` : `<option value="">${t('subLinkNone')}</option><option value="__new" ${sel === '__new' ? 'selected' : ''}>${t('subLinkNew')}</option>`) +
       Object.keys(groups).sort((a, b) => (a === '\u0000arch' ? 1 : b === '\u0000arch' ? -1 : !a ? 1 : !b ? -1 : 0)).map(c => `<optgroup label="${esc(c === '\u0000arch' ? t('subArchived') : subCatName(c))}">${groups[c].map(s =>
-        `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(s.name)} · ${esc(money(+(s.nextPrice != null && s.nextPrice !== '' ? s.nextPrice : s.price) || 0, { ccy: s.ccy, max: 2, raw: true }))}/${esc(cycleShort(s))}${s.expire ? ' · ' + s.expire : ''}</option>`).join('')}</optgroup>`).join('');
+        `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(subLabel(s))} · ${esc(money(+(s.nextPrice != null && s.nextPrice !== '' ? s.nextPrice : s.price) || 0, { ccy: s.ccy, max: 2, raw: true }))}/${esc(cycleShort(s))}${s.expire ? ' · ' + s.expire : ''}</option>`).join('')}</optgroup>`).join('');
   }
   /** 续期到哪天：没到期就从原到期日往后顺延，已过期 / 新订阅从付款日起算 */
   function renewTo(s, cur, date, renew, custom) {
@@ -3881,7 +3883,7 @@
         <div class="hint" id="tf-fee-hint" style="margin:-6px 0 12px"></div></div>
       <div class="field" id="tf-cats-wrap"><label>${t('category')}</label><div class="cat-grid" id="tf-cats"></div></div>
       <div class="field" id="tf-rsub-row" style="display:none"><label>${t('refSub')} <span class="dim">· ${t('codeOpt')}</span></label>
-        <select class="input" id="tf-rsub"><option value="">${t('divOfNone')}</option>${DB.subs.slice().sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0) || String(x.name).localeCompare(String(y.name))).map(x => `<option value="${x.id}" ${ex && ex.refSub === x.id ? 'selected' : ''}>${esc(x.name)}${x.archived ? ' · ' + t('subArchived') : ''}</option>`).join('')}</select>
+        <select class="input" id="tf-rsub">${subOptions((ex && ex.refSub) || '', true)}</select>
         <div class="hint">${t('refSubHint')}</div></div>
       <div class="field" id="tf-div-row" style="display:none"><label>${t('divOf')} <span class="dim">· ${t('codeOpt')}</span></label>
         <select class="input" id="tf-div"><option value="">${t('divOfNone')}</option>${DB.assets.filter(a => !isBalance(a) && !isValA(a)).map(a => `<option value="${a.id}" ${st.divOf === a.id ? 'selected' : ''}>${esc(a.name)}${a.code ? ' · ' + esc(a.code) : ''}</option>`).join('')}</select>
@@ -4795,7 +4797,7 @@
     }
     if (v === '' || v == null) return '<span class="dim">∅</span>';
     if (f === 'cls') return esc((Array.isArray(v) ? v : [v]).map(c => clsName(c)).join(' · '));
-    if (f === 'subId' || f === 'refSub') { const sb = findSub(v); return esc(sb ? sb.name : t('subDeleted')); }
+    if (f === 'subId' || f === 'refSub') { const sb = findSub(v); return esc(sb ? subLabel(sb) : t('subDeleted')); }
     if (f === 'accountId' || f === 'toId' || f === 'feeId') { const a = findAsset(v); return esc(a ? a.name : t('deletedAccount')); }
     if (f === 'cat') return esc(catName(v));
     if (f === 'type') return esc(t(v));
