@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '9.9';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '10.0';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -1091,6 +1091,20 @@
     const today = DB.snaps[tk], o = today && today[bal ? 'bo' : 'po'];
     if (o && o[a.id] != null) return o[a.id];
     return bal ? +a.qty || 0 : +a.price || 0;
+  }
+  /** 补录 / 修改 / 删除过去日期的收支：把对现金 / 余额账户的影响记到那一天，之后每天的总资产记录一起平移，
+      今天不再当作今天的变化（资产走势、每日变化和实际发生的日期一致）。o = 修改前的记录（新增为 null），n = 修改后（删除为 null） */
+  function backShiftTx(o, n) {
+    const tk = todayKey();
+    const eff = x => {
+      if (!x || x.type === 'transfer' || !x.applied || !x.accountId || !x.date || x.date >= tk || !(+x.appliedDelta)) return null;
+      const a = findAsset(x.accountId); return a && isBalance(a) ? { a, du: +x.appliedDelta, D: x.date } : null;
+    };
+    const eo = eff(o), en = eff(n);
+    if (eo && en && eo.a === en.a && eo.D === en.D && Math.abs(eo.du - en.du) < 1e-12) return;
+    const shift = (a, du, D) => backdateVal(Object.assign({}, a, { qty: round8((+a.qty || 0) + du) }), { qty: +a.qty || 0, price: a.price }, D);
+    if (eo) shift(eo.a, -eo.du, eo.D);
+    if (en) shift(en.a, en.du, en.D);
   }
   /** 补记更新市值：把这次变化记到过去的某一天 D。D 当天记录这笔变化（日盈亏 / 走势），之后每天的记录整体平移同样的差额，
       今天的“今日盈亏”起点也随之平移（今天不再重复计入）。old = 更新前的 { qty, price } */
@@ -4283,6 +4297,7 @@
           if (!ex) DB.txs.push(tx);
           if (old) { const d = diffOf(old, tx, TX_FIELDS); if (d.length) logOp('tx', tx, 'edit', d); } else logOp('tx', tx, 'create');
           logBalChanges(bal0, tx, old ? 'edit' : 'create');
+          backShiftTx(old, tx);
           commit(); closeModal(); renderAll();
           const iu = unitLbl(inv);
           toast(`${t('trade_' + trade)} · ${inv.name} ${vm ? money(raw, { ccy: aCcy(inv), raw: true }) : `${trim8(qty)}${iu ? ' ' + iu : ''} @ ${money(px, { ccy: pc, max: pxMax(px), raw: true })}`}${tx.realized != null ? ` · ${t('realized')} ${money(tx.realized, { ccy: tx.realizedCcy, sign: true })}` : ''}${isNew ? ' · ' + t('newAssetMade', { n: to.name }) : ''}${pre && !(old && old.trade) ? ' · ' + t('tradeUndoHint') : ''}`, 'ok');
@@ -4387,6 +4402,7 @@
             if (!ex) DB.txs.push(tx);
             if (old) { const d = diffOf(old, tx, TX_FIELDS); if (d.length) logOp('tx', tx, 'edit', d); } else logOp('tx', tx, 'create');
             logBalChanges(bal0, tx, old ? 'edit' : 'create');
+            backShiftTx(old, tx);
             commit(); closeModal(); renderAll();
             const q = (n, u, c) => (u ? `${trim8(n)} ${u}` : money(n, { ccy: c || aCcy(f), max: 8, raw: true }));
             toast(`${t('transferDone')} · ${f.name} → ${to.name} ${q(amount, fu)}${fee > 0 ? ` · ${t('fee')} ${q(fee, feeU, aCcy(fa))}` : ''}${isNew ? ' · ' + t('newAssetMade', { n: to.name }) : ''}`, 'ok');
@@ -4429,6 +4445,7 @@
           if (!ex) DB.txs.push(tx);
           if (old) { const d = diffOf(old, tx, TX_FIELDS); if (d.length) logOp('tx', tx, 'edit', d); } else logOp('tx', tx, 'create');
           logBalChanges(bal0, tx, old ? 'edit' : 'create');
+          backShiftTx(old, tx);
           commit(); closeModal(); renderAll();
           toast((ex ? t('saved') : t('txSaved', { a: money((tx.type === 'income' ? 1 : -1) * tx.amount, { ccy: tx.ccy, sign: true, max: 8 }) })) + (sub ? ' · ' + t('subRenewed', { n: sub.name, d: sub.expire || t('subForever') }) : ''), 'ok');
           if (sub) checkSubReminders();
@@ -5149,7 +5166,7 @@
       if (!(await confirmDialog({ title: t('batchDelT', { n: ids.length }), msg: t('batchDelTxM'), ok: t('del') }))) return;
       if (!(await requireUnlock())) return;
       const bal0 = balSnapshot();
-      DB.txs.filter(x => st.sel.has(x.id)).forEach(x => { applyTx(x, -1); subRevert(x); logOp('tx', x, 'delete', null, { batch: true }); });
+      DB.txs.filter(x => st.sel.has(x.id)).forEach(x => { applyTx(x, -1); subRevert(x); backShiftTx(x, null); logOp('tx', x, 'delete', null, { batch: true }); });
       logBalChanges(bal0, null, 'batchDelete');
       DB.txs = DB.txs.filter(x => !st.sel.has(x.id));
     }
@@ -5181,6 +5198,7 @@
       subRevert(x);
       logOp('tx', x, 'delete');
       logBalChanges(bal0, x, 'delete');
+      backShiftTx(x, null);
       DB.txs = DB.txs.filter(v => v !== x);
       commit(); renderAll(); toast(t('deleted'), 'ok');
     },
