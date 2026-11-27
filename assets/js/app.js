@@ -85,7 +85,7 @@
     { id: 'subs', icon: 'repeat', k: 'navSubs' },
     { id: 'settings', icon: 'sliders', k: 'navSettings' }
   ];
-  const APP_VER = '10.1';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
+  const APP_VER = '10.2';   // 显示在页脚，方便确认手机 / 电脑是不是最新版
   const API_KEYS = ['finnhubKey', 'twelveKey', 'avKey'];   // 行情 API Key：随加密云端同步
   const SECRET_KEYS = ['devId', 'lastPush', 'finnhubKey', 'twelveKey', 'avKey', 'gistToken', 'passHash', 'syncedStamp', 'syncKey', 'syncSalt', 'syncIter', 'syncKeyPrev', 'passChangedAt', 'keysAt', 'snapsGist', 'syncedRev'];
   const K_SPANS = { '1M': 31, '3M': 92, '6M': 183, '1Y': 366, ALL: 1e9 };
@@ -240,7 +240,7 @@
      每条资产 / 记账自带 log：[{ts, act, diffs:[[字段, 旧值, 新值]], extra}]
      DB.audit 为全局操作日志（含已删除的记录），最多保留 2000 条 */
   const ASSET_FIELDS = ['name', 'code', 'cls', 'warehouse', 'ccy', 'qty', 'cost', 'price', 'unit', 'source', 'note', 'locked', 'balMode', 'noQty'];
-  const TX_FIELDS = ['date', 'type', 'cat', 'trade', 'amount', 'ccy', 'accountId', 'toId', 'toAmount', 'tradePx', 'tradeFee', 'fee', 'feeId', 'subId', 'note'];
+  const TX_FIELDS = ['date', 'type', 'cat', 'trade', 'amount', 'ccy', 'accountId', 'toId', 'toAmount', 'tradePx', 'tradeFee', 'fee', 'feeId', 'subId', 'refSub', 'note'];
   const same = (x, y) => JSON.stringify(x == null ? '' : x) === JSON.stringify(y == null ? '' : y);
   function diffOf(oldR, newR, fields) {
     const d = [];
@@ -2156,7 +2156,7 @@
   }
   const txCls = x => (x.type === 'income' ? 'up' : x.type === 'expense' ? 'down' : 'muted');
   /** 记账关联的订阅（小标签） */
-  const subLinkTag = x => (x.subId ? `<span class="sub-link" title="${t('subLink')}">${ic('repeat')}${esc((findSub(x.subId) || {}).name || t('subDeleted'))}</span>` : '');
+  const subLinkTag = x => (x.subId || x.refSub ? `<span class="sub-link" title="${t(x.refSub ? 'refSub' : 'subLink')}">${ic('repeat')}${x.refSub ? t('subBillRefund') + ' · ' : ''}${esc((findSub(x.subId || x.refSub) || {}).name || t('subDeleted'))}</span>` : '');
   function txRowHTML(x, withOps, batch) {
     const orig = x.ccy && x.ccy !== S().ccy;
     return `<div class="tx-row ${batch ? 'batch' : ''}">
@@ -2793,7 +2793,9 @@
       if (s.cycle === 'once') break;
       d = cycleAt(b0, s, ++n);
     }
-    return real.concat(est);
+    // 退款：收入关联了这个订阅（refSub），按负数计入花费
+    const refunds = DB.txs.filter(x => x.refSub === s.id && x.type === 'income').map(x => ({ date: x.date, v: -conv(+x.amount || 0, x.ccy), amt: -(+x.amount || 0), ccy: x.ccy, real: true, refund: true, id: x.id }));
+    return real.concat(est, refunds);
   }
   function allSubPays() { const out = []; DB.subs.forEach(s => subPays(s).forEach(p => out.push(Object.assign({ s }, p)))); return out; }
   const subTotal = s => subPays(s).reduce((a, p) => a + p.v, 0);
@@ -3013,7 +3015,7 @@
       { k: 'start', label: t('subColStart'), th: t('subColStart'), tdCls: 'num', td: x => `${x.s.start || '—'}${x.s.cycle === 'once' ? `<small>${t('subBuyDate')}</small>` : x.s.trialDays > 0 ? `<small>${t('subBillFrom', { d: billStart(x.s) })}</small>` : ''}` },
       Object.assign({ k: 'expire', label: t('subColExpire'), tdCls: 'num exp-cell', td: x => expireHTML(x.s) }, sortTh('expire', t('subColExpire'))),
       { k: 'remind', label: t('subColRemind'), th: t('subColRemind'), thCls: 'c', tdCls: 'c', td: x => (+x.s.remind ? `<span class="rm-b">${ic('clock')}${t('subRemindN', { n: x.s.remind })}</span>` : '<span class="dim">—</span>') },
-      Object.assign({ k: 'total', label: t('subColTotal'), tdCls: 'r num strong', td: x => `${money(x.total)}<small>${t('subPayN', { n: subPays(x.s).length })}${(x.s.prices && x.s.prices.length > 1) || (x.s.adj && Object.keys(x.s.adj).length) ? ` · <span class="adj-mk">${t('subBillAdjMk')}</span>` : ''}</small>` }, sortTh('total', t('subColTotal'))),
+      Object.assign({ k: 'total', label: t('subColTotal'), tdCls: 'r num strong', td: x => `${money(x.total)}<small>${t('subPayN', { n: subPays(x.s).filter(p => !p.refund).length })}${(x.s.prices && x.s.prices.length > 1) || (x.s.adj && Object.keys(x.s.adj).length) ? ` · <span class="adj-mk">${t('subBillAdjMk')}</span>` : ''}</small>` }, sortTh('total', t('subColTotal'))),
       { k: 'ops', label: t('colOps'), fixed: true, th: t('colOps'), thCls: 'c', tdCls: 'c', td: x => (U.batch ? '' : h.ops(x.s)) }
     ];
   }
@@ -3090,7 +3092,7 @@
         };
         const drawList = () => {
           const f = fake(), bills = subPays(f, true).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) * (st.asc ? -1 : 1));
-          const counted = bills.filter(b => b.tag !== 'skip'), tot = counted.reduce((a, b) => a + b.v, 0);
+          const counted = bills.filter(b => b.tag !== 'skip' && !b.refund), tot = bills.filter(b => b.tag !== 'skip').reduce((a, b) => a + b.v, 0);
           const nAdj = bills.filter(b => b.tag).length;
           $('#bl-sum', m).innerHTML = `<div class="dim">${t('subColTotal')}</div><b class="num">${money(tot)}</b>
             <small>${t('subPayN', { n: counted.length })}${counted.length ? ` · ${t('subBillAvg', { v: money(tot / counted.length) })}` : ''}${nAdj ? ` · ${t('subBillAdjN', { n: nAdj })}` : ''}</small>`;
@@ -3102,7 +3104,7 @@
           $('#bl-range', m).innerHTML = ds.length ? `${ic('cal')}${t('subBillRange', { a: ds[0], b: ds[ds.length - 1], n: bills.length })}${why.length ? `<small>${why.join('；')}</small>` : ''}` : '';
           if (!bills.length) { $('#bl-list', m).innerHTML = `<div class="empty sm"><p>${t('subBillNone')}</p></div>`; return; }
           const rows = bills.map(b => {
-            if (b.real) return `<div class="bl-row real"><span class="num bl-d">${b.date}</span><span class="bl-tag rec">${t('subBillRec')}</span>
+            if (b.real) return `<div class="bl-row real ${b.refund ? 'refund' : ''}"><span class="num bl-d">${b.date}</span><span class="bl-tag ${b.refund ? 'refund' : 'rec'}">${t(b.refund ? 'subBillRefund' : 'subBillRec')}</span>
               <span class="num bl-a">${money(b.amt, { ccy: b.ccy, max: 2 })}</span><button type="button" class="icon-btn sm" data-tx="${b.id}" title="${t('subBillOpenTx')}">${ic('edit')}</button></div>`;
             const tag = b.tag === 'free' ? t('subBillFree') : b.tag === 'skip' ? t('subBillSkip') : b.tag === 'custom' ? t('subBillDisc') : t('subBillEst');
             const changed = b.tag && (Math.abs(b.amt - b.base) > 1e-9 || b.ccy !== cs);
@@ -3878,6 +3880,9 @@
         </div>
         <div class="hint" id="tf-fee-hint" style="margin:-6px 0 12px"></div></div>
       <div class="field" id="tf-cats-wrap"><label>${t('category')}</label><div class="cat-grid" id="tf-cats"></div></div>
+      <div class="field" id="tf-rsub-row" style="display:none"><label>${t('refSub')} <span class="dim">· ${t('codeOpt')}</span></label>
+        <select class="input" id="tf-rsub"><option value="">${t('divOfNone')}</option>${DB.subs.slice().sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0) || String(x.name).localeCompare(String(y.name))).map(x => `<option value="${x.id}" ${ex && ex.refSub === x.id ? 'selected' : ''}>${esc(x.name)}${x.archived ? ' · ' + t('subArchived') : ''}</option>`).join('')}</select>
+        <div class="hint">${t('refSubHint')}</div></div>
       <div class="field" id="tf-div-row" style="display:none"><label>${t('divOf')} <span class="dim">· ${t('codeOpt')}</span></label>
         <select class="input" id="tf-div"><option value="">${t('divOfNone')}</option>${DB.assets.filter(a => !isBalance(a) && !isValA(a)).map(a => `<option value="${a.id}" ${st.divOf === a.id ? 'selected' : ''}>${esc(a.name)}${a.code ? ' · ' + esc(a.code) : ''}</option>`).join('')}</select>
         <div class="hint">${t('divOfHint')}</div></div>
@@ -3912,7 +3917,10 @@
         };
         const isTr = () => st.type === 'transfer';
         /** 收入选「投资收益」时可以关联「来自哪只股票」，用于摊薄成本 */
-        const divSync = () => { $('#tf-div-row', m).style.display = st.type === 'income' && st.cat === 'invest' ? '' : 'none'; };
+        const divSync = () => {
+          $('#tf-div-row', m).style.display = st.type === 'income' && st.cat === 'invest' ? '' : 'none';
+          $('#tf-rsub-row', m).style.display = st.type === 'income' && DB.subs.length && (st.cat === 'refund' || $('#tf-rsub', m).value) ? '' : 'none';
+        };
         /** 同步余额：现金 / 负债按金额加减；其他资产按现价折算成数量加减（收入按价值计入成本，支出不改平均成本） */
         const syncRow = () => {
           const a = findAsset($('#tf-acct', m).value), row = $('#tf-sync-row', m), sub = $('#tf-sync-sub', m);
@@ -4217,6 +4225,7 @@
         $('#tf-recv', m).addEventListener('input', () => { recvTouched = true; trSync(); });
         $('#tf-fee', m).addEventListener('input', trSync);
         $('#tf-amount', m).addEventListener('input', trSync);
+        $('#tf-rsub', m).addEventListener('change', () => divSync());
         $('#tf-trade', m).addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (!b) return; tradeTouched = true; setTrade(b.dataset.v); trSync(); });
         ['#tr-qty', '#tr-px', '#tr-fee'].forEach(id => $(id, m).addEventListener('input', () => { totTouched = false; tradeSync(); }));
         $('#tr-fee-acct', m).addEventListener('change', () => { totTouched = false; tradeSync(); });
@@ -4426,6 +4435,9 @@
           delete tx.appliedPx; delete tx.appliedCost;
           const dv = tx.type === 'income' && tx.cat === 'invest' ? $('#tf-div', m).value : '', da = dv ? findAsset(dv) : null;
           if (da) { tx.divOf = da.id; tx.divV = round8(conv(tx.amount, tx.ccy, aCcy(da))); }
+          delete tx.refSub;
+          const rs = tx.type === 'income' ? $('#tf-rsub', m).value : '';
+          if (rs && DB.subs.some(x => x.id === rs)) tx.refSub = rs;   // 退款关联订阅：计入那个订阅的花费（负数），不影响续期
           const a = findAsset(tx.accountId), sgn = tx.type === 'income' ? 1 : -1;
           if (a && $('#tf-sync', m).checked) {
             if (isBalance(a)) {
@@ -4783,7 +4795,7 @@
     }
     if (v === '' || v == null) return '<span class="dim">∅</span>';
     if (f === 'cls') return esc((Array.isArray(v) ? v : [v]).map(c => clsName(c)).join(' · '));
-    if (f === 'subId') { const sb = findSub(v); return esc(sb ? sb.name : t('subDeleted')); }
+    if (f === 'subId' || f === 'refSub') { const sb = findSub(v); return esc(sb ? sb.name : t('subDeleted')); }
     if (f === 'accountId' || f === 'toId' || f === 'feeId') { const a = findAsset(v); return esc(a ? a.name : t('deletedAccount')); }
     if (f === 'cat') return esc(catName(v));
     if (f === 'type') return esc(t(v));
